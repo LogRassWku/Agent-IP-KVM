@@ -18,6 +18,9 @@ const elements = {
   agentComposer: document.querySelector("#agent-composer"), agentInput: document.querySelector("#agent-input"),
   agentSend: document.querySelector("#agent-send"), agentConversation: document.querySelector("#agent-conversation"),
   agentSuggestions: document.querySelector(".agent-suggestions"), tools: document.querySelector(".tools"),
+  agentApp: document.querySelector(".agent-app"), agentSidebar: document.querySelector("#agent-sidebar"),
+  agentSidebarToggle: document.querySelector("#agent-sidebar-toggle"), newAgentChat: document.querySelector("#new-agent-chat"),
+  agentSessionList: document.querySelector("#agent-session-list"), agentChatTitle: document.querySelector("#agent-chat-title"),
 };
 
 let videoModes = [];
@@ -30,6 +33,9 @@ let pendingPointer = null;
 let pendingWheel = 0;
 let pointerRequestActive = false;
 let agentMode = false;
+const agentStorageKey = "agent-ip-kvm.sessions.v1";
+let agentSessions = [];
+let activeAgentSessionId = "";
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
 
@@ -159,6 +165,10 @@ function setKeyboard(open) {
 
 function setAgentMode(open) {
   agentMode = Boolean(open);
+  if (!agentMode) {
+    elements.agentApp.classList.remove("sidebar-open");
+    elements.agentSidebarToggle.setAttribute("aria-expanded", "false");
+  }
   document.body.classList.toggle("agent-mode", agentMode);
   elements.agentModeButton.setAttribute("aria-pressed", String(agentMode));
   elements.agentModeButton.title = agentMode ? "返回 KVM 模式" : "切换到 Agent 模式";
@@ -174,6 +184,155 @@ function setAgentMode(open) {
   }
 }
 
+function newSessionId() {
+  return globalThis.crypto?.randomUUID?.() ?? `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function makeAgentSession() {
+  const now = Date.now();
+  return { id: newSessionId(), title: "新会话", createdAt: now, updatedAt: now, messages: [] };
+}
+
+function saveAgentSessions() {
+  try {
+    localStorage.setItem(agentStorageKey, JSON.stringify({ activeId: activeAgentSessionId, sessions: agentSessions }));
+  } catch (_) { /* The interface remains usable if local storage is unavailable. */ }
+}
+
+function loadAgentSessions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(agentStorageKey) ?? "null");
+    if (Array.isArray(saved?.sessions)) {
+      agentSessions = saved.sessions.filter((session) =>
+        session && typeof session.id === "string" && typeof session.title === "string" && Array.isArray(session.messages));
+      activeAgentSessionId = typeof saved.activeId === "string" ? saved.activeId : "";
+    }
+  } catch (_) { agentSessions = []; }
+  if (agentSessions.length === 0) agentSessions.push(makeAgentSession());
+  if (!agentSessions.some((session) => session.id === activeAgentSessionId)) activeAgentSessionId = agentSessions[0].id;
+  saveAgentSessions();
+}
+
+function activeAgentSession() {
+  return agentSessions.find((session) => session.id === activeAgentSessionId) ?? agentSessions[0];
+}
+
+function renderAgentSessions() {
+  elements.agentSessionList.replaceChildren();
+  const sorted = [...agentSessions].sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt));
+  for (const session of sorted) {
+    const item = document.createElement("div");
+    item.className = `session-item${session.id === activeAgentSessionId ? " active" : ""}`;
+    item.dataset.sessionId = session.id;
+
+    const select = document.createElement("button");
+    select.className = "session-select";
+    select.type = "button";
+    select.dataset.sessionAction = "select";
+    select.title = session.title;
+    select.textContent = session.title;
+
+    const actions = document.createElement("span");
+    actions.className = "session-actions";
+    const rename = document.createElement("button");
+    rename.className = "session-action";
+    rename.type = "button";
+    rename.dataset.sessionAction = "rename";
+    rename.title = "重命名会话";
+    rename.setAttribute("aria-label", `重命名 ${session.title}`);
+    rename.textContent = "✎";
+    const remove = document.createElement("button");
+    remove.className = "session-action delete";
+    remove.type = "button";
+    remove.dataset.sessionAction = "delete";
+    remove.title = "删除会话";
+    remove.setAttribute("aria-label", `删除 ${session.title}`);
+    remove.textContent = "×";
+    actions.append(rename, remove);
+    item.append(select, actions);
+    elements.agentSessionList.append(item);
+  }
+}
+
+function renderAgentMessage(message) {
+  const article = document.createElement("article");
+  const assistant = message.role === "assistant";
+  article.className = `agent-message ${assistant ? "assistant-message" : "user-message"}`;
+  if (assistant) {
+    const avatar = document.createElement("span");
+    avatar.className = "message-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    avatar.textContent = "A";
+    article.append(avatar);
+  }
+  const content = document.createElement("div");
+  const name = document.createElement("strong");
+  name.textContent = assistant ? "Agent" : "你";
+  const paragraph = document.createElement("p");
+  paragraph.textContent = String(message.content ?? "");
+  content.append(name, paragraph);
+  article.append(content);
+  return article;
+}
+
+function renderAgentConversation() {
+  const session = activeAgentSession();
+  elements.agentChatTitle.textContent = session.title;
+  elements.agentConversation.replaceChildren();
+  if (session.messages.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "agent-empty";
+    empty.innerHTML = '<div><span class="agent-orb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 13.8 8l4.7 1.8-4.7 1.8L12 16l-1.8-4.4-4.7-1.8L10.2 8 12 3.5Z"/><path d="m18.3 15 .8 2.1 2.2.9-2.2.8-.8 2.2-.9-2.2-2.1-.8 2.1-.9.9-2.1Z"/></svg></span><h2>需要我做什么？</h2><p>描述你想在目标电脑上完成的任务。Agent 可以观察屏幕、规划步骤，并在执行敏感操作前请求你的允许。</p></div>';
+    elements.agentConversation.append(empty);
+    return;
+  }
+  for (const message of session.messages) elements.agentConversation.append(renderAgentMessage(message));
+  elements.agentConversation.scrollTop = elements.agentConversation.scrollHeight;
+}
+
+function selectAgentSession(sessionId) {
+  if (!agentSessions.some((session) => session.id === sessionId)) return;
+  activeAgentSessionId = sessionId;
+  elements.agentApp.classList.remove("sidebar-open");
+  saveAgentSessions();
+  renderAgentSessions();
+  renderAgentConversation();
+  elements.agentInput.focus({ preventScroll: true });
+}
+
+function createAgentSession() {
+  const session = makeAgentSession();
+  agentSessions.push(session);
+  activeAgentSessionId = session.id;
+  saveAgentSessions();
+  renderAgentSessions();
+  renderAgentConversation();
+  elements.agentInput.focus({ preventScroll: true });
+}
+
+function renameAgentSession(sessionId) {
+  const session = agentSessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  const title = window.prompt("输入新的会话名称", session.title)?.trim();
+  if (!title) return;
+  session.title = title.slice(0, 60);
+  session.updatedAt = Date.now();
+  saveAgentSessions();
+  renderAgentSessions();
+  renderAgentConversation();
+}
+
+function deleteAgentSession(sessionId) {
+  const session = agentSessions.find((item) => item.id === sessionId);
+  if (!session || !window.confirm(`删除会话“${session.title}”？`)) return;
+  agentSessions = agentSessions.filter((item) => item.id !== sessionId);
+  if (agentSessions.length === 0) agentSessions.push(makeAgentSession());
+  if (activeAgentSessionId === sessionId) activeAgentSessionId = [...agentSessions].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+  saveAgentSessions();
+  renderAgentSessions();
+  renderAgentConversation();
+}
+
 function resizeAgentInput() {
   elements.agentInput.style.height = "auto";
   elements.agentInput.style.height = `${Math.min(130, elements.agentInput.scrollHeight)}px`;
@@ -182,17 +341,13 @@ function resizeAgentInput() {
 function submitAgentPrompt(prompt) {
   const value = String(prompt ?? "").trim();
   if (!value) return;
-  const article = document.createElement("article");
-  article.className = "agent-message user-message";
-  const content = document.createElement("div");
-  const name = document.createElement("strong");
-  name.textContent = "你";
-  const message = document.createElement("p");
-  message.textContent = value;
-  content.append(name, message);
-  article.append(content);
-  elements.agentConversation.append(article);
-  elements.agentConversation.scrollTop = elements.agentConversation.scrollHeight;
+  const session = activeAgentSession();
+  session.messages.push({ role: "user", content: value, createdAt: Date.now() });
+  if (session.title === "新会话") session.title = value.replace(/\s+/g, " ").slice(0, 24);
+  session.updatedAt = Date.now();
+  saveAgentSessions();
+  renderAgentSessions();
+  renderAgentConversation();
   elements.agentInput.value = "";
   resizeAgentInput();
 }
@@ -335,6 +490,20 @@ elements.videoShell.addEventListener("contextmenu", (event) => {
   if (!agentMode && hidEnabled && pointerFromEvent(event) !== null) event.preventDefault();
 });
 elements.agentModeButton.addEventListener("click", () => setAgentMode(!agentMode));
+elements.newAgentChat.addEventListener("click", createAgentSession);
+elements.agentSidebarToggle.addEventListener("click", () => {
+  const open = !elements.agentApp.classList.contains("sidebar-open");
+  elements.agentApp.classList.toggle("sidebar-open", open);
+  elements.agentSidebarToggle.setAttribute("aria-expanded", String(open));
+});
+elements.agentSessionList.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-session-action]");
+  const sessionId = event.target.closest("[data-session-id]")?.dataset.sessionId;
+  if (!action || !sessionId) return;
+  if (action.dataset.sessionAction === "select") selectAgentSession(sessionId);
+  if (action.dataset.sessionAction === "rename") renameAgentSession(sessionId);
+  if (action.dataset.sessionAction === "delete") deleteAgentSession(sessionId);
+});
 elements.agentInput.addEventListener("input", resizeAgentInput);
 elements.agentInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
@@ -369,6 +538,10 @@ elements.applyScreenSettings.addEventListener("click", async () => {
 document.addEventListener("click", (event) => {
   if (!event.target.closest("#mouse-tool-menu") && !event.target.closest("#mouse-button")) setMouseMenu(false);
   if (!event.target.closest("#screen-menu") && !event.target.closest("#screen-button")) setScreenMenu(false);
+  if (elements.agentApp.classList.contains("sidebar-open") && !event.target.closest("#agent-sidebar") && !event.target.closest("#agent-sidebar-toggle")) {
+    elements.agentApp.classList.remove("sidebar-open");
+    elements.agentSidebarToggle.setAttribute("aria-expanded", "false");
+  }
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
@@ -377,4 +550,5 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+loadAgentSessions(); renderAgentSessions(); renderAgentConversation();
 setZoom(100); setCursorSize("medium"); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000);
