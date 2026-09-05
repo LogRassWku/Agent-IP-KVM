@@ -48,7 +48,9 @@ objcopy -j .text -j .sdata -j .data -j .dynamic -j .dynsym \
     --output-target=efi-app-x86_64 --subsystem=10 "$OUT_DIR/test.so" "$EFI_FILE"
 
 dd if=/dev/zero of="$IMAGE" bs=1M count=32 status=none
-mkfs.fat -F 32 -n AGENTKVM "$IMAGE" >/dev/null
+# Include a conventional MBR partition entry so firmware that only lists
+# partitioned removable media (such as some Lenovo UEFI versions) can see it.
+mkfs.fat -F 32 --mbr=y -n AGENTKVM "$IMAGE" >/dev/null
 export MTOOLS_SKIP_CHECK=1
 "$MMD" -i "$IMAGE" ::/EFI
 "$MMD" -i "$IMAGE" ::/EFI/BOOT

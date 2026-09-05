@@ -11,4 +11,4 @@ scripts/build-uefi-test-image.sh
 ```
 
 生成的镜像位于 `work/uefi-test/agent-ip-kvm-uefi-test.img`，其中包含
-`EFI/BOOT/BOOTX64.EFI`。镜像只用于测试 USB 启动枚举，不会安装系统。
+`EFI/BOOT/BOOTX64.EFI`，并带有标准 MBR 分区项，兼容只显示分区式可移动介质的固件。镜像只用于测试 USB 启动枚举，不会安装系统。
