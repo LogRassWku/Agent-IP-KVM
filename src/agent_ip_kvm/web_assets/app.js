@@ -344,6 +344,13 @@ function loadAgentSessions() {
     if (Array.isArray(saved?.sessions)) {
       agentSessions = saved.sessions.filter((session) =>
         session && typeof session.id === "string" && typeof session.title === "string" && Array.isArray(session.messages));
+      for (const session of agentSessions) {
+        for (const message of session.messages) {
+          if (message && typeof message === "object" && ["ready", "pending_approval", "approved", "executing"].includes(message.plan?.status)) {
+            message.plan.status = "expired";
+          }
+        }
+      }
       activeAgentSessionId = typeof saved.activeId === "string" ? saved.activeId : "";
     }
   } catch (_) { agentSessions = []; }
