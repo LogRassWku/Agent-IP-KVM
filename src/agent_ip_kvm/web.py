@@ -31,6 +31,7 @@ from .agent_control import (
 )
 from .host_info import HostInfoStore
 from .model_setup import ModelSetupError, ModelSetupStore
+from .remote_model import RemoteModelError, RemoteModelStore
 from .hid import (
     HidAdapter,
     HidError,
@@ -66,6 +67,7 @@ class WebConfig:
     pc_agent_suggestion_path: Path = Path("data/pc-agent-suggestion.json")
     model_setup_path: Path = Path("data/model-setup-tasks.json")
     pc_agent_callback_url: str = "http://192.168.128.10:8765"
+    remote_model_path: Path = Path("data/remote-model.json")
 
 
 def _make_source(config: WebConfig) -> VideoSource:
@@ -810,6 +812,7 @@ def create_handler(
     pc_agent_store: PcAgentSuggestionStore | None = None,
     agent_coordinator: AgentCoordinator | None = None,
     model_setup_store: ModelSetupStore | None = None,
+    remote_model_store: RemoteModelStore | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     stream = stream_provider or VideoStreamController(config)
     hid = hid_controller or HidWebController()
@@ -818,6 +821,7 @@ def create_handler(
     peer_auth = peer_authenticator or PeerTokenAuthenticator(config.pc_agent_token_path)
     pc_agent = pc_agent_store or PcAgentSuggestionStore(config.pc_agent_suggestion_path)
     model_setup = model_setup_store or ModelSetupStore(config.model_setup_path)
+    remote_model = remote_model_store or RemoteModelStore(config.remote_model_path)
     agent = agent_coordinator or AgentCoordinator(
         hid_controller=hid,
         observe=lambda: observe_stream(stream, config),
@@ -846,6 +850,7 @@ def create_handler(
                     **pc_agent.status(),
                 }
                 payload["model_setup"] = {"latest": model_setup.latest()}
+                payload["remote_model"] = remote_model.public()
                 self._send_json(payload)
                 return
             if path == "/api/video/snapshot.jpg":
@@ -890,6 +895,9 @@ def create_handler(
                     return
                 self._send_bytes(script, "text/plain; charset=utf-8")
                 return
+            if path in {"/api/remote-model/catalog", "/api/remote-model/config"}:
+                self._send_json(remote_model.public())
+                return
             if path == "/api/stream.mjpg":
                 self._send_mjpeg()
                 return
@@ -919,6 +927,9 @@ def create_handler(
                 "/api/model-setup/tasks",
                 "/api/model-setup/launch",
                 "/api/model-setup/progress",
+                "/api/remote-model/config",
+                "/api/remote-model/test",
+                "/api/agent/chat",
             }:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -945,7 +956,7 @@ def create_handler(
                 length = 0
             maximum_length = (
                 65536
-                if path in {"/api/host-info", "/api/pc-agent/suggestions", "/api/model-setup/progress"}
+                if path in {"/api/host-info", "/api/pc-agent/suggestions", "/api/model-setup/progress", "/api/agent/chat"}
                 else 32768
                 if path.startswith("/api/agent/")
                 else 4096
@@ -1028,6 +1039,31 @@ def create_handler(
                         progress=task["progress"],
                     )
                     result = {"task": task}
+                elif path == "/api/remote-model/config":
+                    configured = remote_model.save(payload)
+                    audit.record(
+                        "remote_model_configured",
+                        model=configured["model"],
+                        base_url=configured["base_url"],
+                    )
+                    result = {"remote_model": configured}
+                elif path == "/api/remote-model/test":
+                    response = remote_model.chat(
+                        [{"role": "user", "content": "Reply with exactly OK."}],
+                        timeout=30,
+                    )
+                    audit.record("remote_model_tested", model=response["model"])
+                    result = {
+                        "remote_model": {
+                            "ok": True,
+                            "model": response["model"],
+                            "reply": response["content"][:200],
+                        }
+                    }
+                elif path == "/api/agent/chat":
+                    messages = payload.get("messages")
+                    response = remote_model.chat(messages)
+                    result = {"response": response}
                 else:
                     hid.release_all()
                     result = {"hid": hid.status()}
@@ -1043,6 +1079,7 @@ def create_handler(
                 TypeError,
                 ValueError,
                 ModelSetupError,
+                RemoteModelError,
                 OSError,
                 VideoSourceError,
                 HidError,
@@ -1145,6 +1182,7 @@ class KVMHTTPServer(ThreadingHTTPServer):
         self.peer_authenticator = PeerTokenAuthenticator(config.pc_agent_token_path)
         self.pc_agent_store = PcAgentSuggestionStore(config.pc_agent_suggestion_path)
         self.model_setup_store = ModelSetupStore(config.model_setup_path)
+        self.remote_model_store = RemoteModelStore(config.remote_model_path)
         self.agent_coordinator = AgentCoordinator(
             hid_controller=self.hid_controller,
             observe=lambda: observe_stream(self.stream_controller, config),
@@ -1163,6 +1201,7 @@ class KVMHTTPServer(ThreadingHTTPServer):
                 pc_agent_store=self.pc_agent_store,
                 agent_coordinator=self.agent_coordinator,
                 model_setup_store=self.model_setup_store,
+                remote_model_store=self.remote_model_store,
             ),
         )
 
@@ -1264,6 +1303,12 @@ def _parser() -> argparse.ArgumentParser:
         help="KVM address reachable by the controlled host over USB networking",
     )
     parser.add_argument(
+        "--remote-model-file",
+        type=Path,
+        default=Path("data/remote-model.json"),
+        help="local remote model configuration (contains the API key)",
+    )
+    parser.add_argument(
         "--enable-hid",
         action="store_true",
         help="explicitly enable Web keyboard output",
@@ -1303,6 +1348,7 @@ def main(argv: list[str] | None = None) -> int:
         pc_agent_suggestion_path=args.pc_agent_suggestion_file,
         model_setup_path=args.model_setup_file,
         pc_agent_callback_url=args.pc_agent_callback_url.rstrip("/"),
+        remote_model_path=args.remote_model_file,
     )
     hid_adapter: HidAdapter | None = None
     hid_controller: HidWebController | None = None

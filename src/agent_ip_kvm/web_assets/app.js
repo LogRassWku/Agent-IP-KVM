@@ -444,6 +444,7 @@ function renderAgentMessage(message) {
   content.append(paragraph);
   if (message.plan) content.append(renderAgentPlan(message.plan));
   if (message.modelSetup) content.append(renderModelSetup(message));
+  if (message.remoteModelSetup) content.append(renderRemoteModelSetup(message));
   article.append(content);
   return article;
 }
@@ -497,6 +498,45 @@ function renderModelSetup(message) {
   const events = document.createElement("ol"); events.className = "model-setup-events";
   for (const event of task.events ?? []) { const item = document.createElement("li"); item.textContent = event.message; events.append(item); }
   card.append(status, progress, messageText, details, events);
+  return card;
+}
+
+function renderRemoteModelSetup(message) {
+  const setup = message.remoteModelSetup;
+  const card = document.createElement("section");
+  card.className = "model-setup-card remote-model-setup";
+  card.dataset.remoteSetupMessageId = message.id;
+  const title = document.createElement("h2"); title.textContent = "配置远程 API";
+  const description = document.createElement("p");
+  description.textContent = "兼容 OpenAI 格式的接口。密钥只保存在开发板，不会回显到网页。";
+  card.append(title, description);
+  const fields = document.createElement("div"); fields.className = "model-setup-fields";
+  const baseLabel = document.createElement("label"); baseLabel.textContent = "接口地址";
+  const baseInput = document.createElement("input"); baseInput.dataset.remoteField = "base_url";
+  baseInput.value = setup.baseUrl || "https://api.deepseek.com"; baseInput.autocomplete = "url";
+  baseLabel.append(baseInput);
+  const modelLabel = document.createElement("label"); modelLabel.textContent = "模型";
+  const modelSelect = document.createElement("select"); modelSelect.dataset.remoteField = "model";
+  for (const model of setup.catalog?.models ?? []) {
+    const option = document.createElement("option"); option.value = model.id;
+    option.textContent = model.name; option.title = model.description;
+    option.selected = model.id === (setup.model || "deepseek-v4-flash"); modelSelect.append(option);
+  }
+  modelLabel.append(modelSelect);
+  const keyLabel = document.createElement("label"); keyLabel.className = "wide"; keyLabel.textContent = "API 密钥";
+  const keyInput = document.createElement("input"); keyInput.type = "password"; keyInput.dataset.remoteField = "api_key";
+  keyInput.placeholder = setup.configured ? "已配置，输入新密钥可替换" : "粘贴 DeepSeek API 密钥";
+  keyInput.autocomplete = "new-password"; keyLabel.append(keyInput);
+  fields.append(baseLabel, modelLabel, keyLabel); card.append(fields);
+  const actions = document.createElement("div"); actions.className = "model-setup-actions";
+  const save = document.createElement("button"); save.type = "button"; save.className = "model-setup-start";
+  save.dataset.remoteSetupAction = "save"; save.textContent = "保存配置"; actions.append(save);
+  if (setup.configured) {
+    const test = document.createElement("button"); test.type = "button"; test.className = "model-setup-test";
+    test.dataset.remoteSetupAction = "test"; test.textContent = "测试连接"; actions.append(test);
+  }
+  card.append(actions);
+  if (setup.result) { const result = document.createElement("p"); result.className = "model-setup-result"; result.textContent = setup.result; card.append(result); }
   return card;
 }
 
@@ -629,14 +669,22 @@ async function submitAgentPrompt(prompt) {
   resizeAgentInput();
   elements.agentSend.disabled = true;
   try {
-    const response = await postJson("/api/agent/plans", { objective: value, model: selectedAgentModel });
-    const plan = response.plan;
-    const assistantMessage = { role: "assistant", content: plan.summary, plan, createdAt: Date.now() };
-    session.messages.push(assistantMessage);
-    session.updatedAt = Date.now();
-    if (!plan.approval_required) {
-      const executed = await postJson("/api/agent/execute", { plan_id: plan.plan_id });
-      assistantMessage.plan = executed.plan;
+    if (selectedAgentModel === "remote-api") {
+      const messages = session.messages
+        .filter((item) => (item.role === "user" || item.role === "assistant") && !item.modelSetup && !item.remoteModelSetup)
+        .slice(-20).map((item) => ({ role: item.role, content: String(item.content ?? "") }));
+      const response = await postJson("/api/agent/chat", { messages });
+      session.messages.push({ role: "assistant", content: response.response.content, createdAt: Date.now(), remoteModel: response.response.model });
+    } else {
+      const response = await postJson("/api/agent/plans", { objective: value, model: selectedAgentModel });
+      const plan = response.plan;
+      const assistantMessage = { role: "assistant", content: plan.summary, plan, createdAt: Date.now() };
+      session.messages.push(assistantMessage);
+      session.updatedAt = Date.now();
+      if (!plan.approval_required) {
+        const executed = await postJson("/api/agent/execute", { plan_id: plan.plan_id });
+        assistantMessage.plan = executed.plan;
+      }
     }
   } catch (error) {
     session.messages.push({ role: "assistant", content: `无法处理：${error.message}`, createdAt: Date.now() });
@@ -671,6 +719,54 @@ async function openPcAgentSetup() {
   agentSessions.push(session); activeAgentSessionId = session.id;
   saveAgentSessions(); renderAgentSessions(); renderAgentConversation();
   if (task && !["completed", "failed"].includes(task.status)) pollModelSetupTasks();
+}
+
+async function openRemoteModelSetup() {
+  setAgentModelMenu(false);
+  let catalog;
+  let current;
+  try {
+    [catalog, current] = await Promise.all([fetchJson("/api/remote-model/catalog"), fetchJson("/api/remote-model/config")]);
+  } catch (error) {
+    window.alert(`无法读取远程 API 配置：${error.message}`); return;
+  }
+  const session = makeAgentSession(); session.title = "配置远程 API";
+  session.messages.push({
+    id: newSessionId(), role: "assistant", content: current.configured ? "远程 API 已配置，可以替换密钥或测试连接。" : "请选择 DeepSeek 模型并填写 API 密钥。",
+    createdAt: Date.now(), remoteModelSetup: {
+      catalog, baseUrl: current.base_url, model: current.model, configured: current.configured, result: "",
+    },
+  });
+  agentSessions.push(session); activeAgentSessionId = session.id;
+  saveAgentSessions(); renderAgentSessions(); renderAgentConversation();
+}
+
+async function saveRemoteModelSetup(card) {
+  const session = activeAgentSession();
+  const message = session.messages.find((item) => item.id === card.dataset.remoteSetupMessageId);
+  if (!message?.remoteModelSetup) return;
+  const button = card.querySelector("[data-remote-setup-action='save']"); button.disabled = true;
+  const baseUrl = card.querySelector("[data-remote-field='base_url']").value.trim();
+  const model = card.querySelector("[data-remote-field='model']").value;
+  const apiKey = card.querySelector("[data-remote-field='api_key']").value.trim();
+  try {
+    const saved = await postJson("/api/remote-model/config", { base_url: baseUrl, model, api_key: apiKey });
+    message.remoteModelSetup = { ...message.remoteModelSetup, baseUrl: saved.remote_model.base_url, model: saved.remote_model.model, configured: true, result: "配置已保存。点击“测试连接”确认服务可用。" };
+    selectAgentModel("remote-api");
+  } catch (error) { message.remoteModelSetup.result = `保存失败：${error.message}`; }
+  session.updatedAt = Date.now(); saveAgentSessions(); renderAgentSessions(); renderAgentConversation();
+}
+
+async function testRemoteModelSetup(card) {
+  const session = activeAgentSession();
+  const message = session.messages.find((item) => item.id === card.dataset.remoteSetupMessageId);
+  if (!message?.remoteModelSetup) return;
+  const button = card.querySelector("[data-remote-setup-action='test']"); if (button) button.disabled = true;
+  try {
+    const result = await postJson("/api/remote-model/test", {});
+    message.remoteModelSetup.result = `连接成功：${result.remote_model.reply}`;
+  } catch (error) { message.remoteModelSetup.result = `连接失败：${error.message}`; }
+  session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation();
 }
 
 async function startModelSetup(card) {
@@ -939,13 +1035,24 @@ elements.agentComposer.addEventListener("submit", (event) => {
 elements.agentConversation.addEventListener("click", (event) => {
   const setupButton = event.target.closest("[data-setup-action]");
   if (setupButton) { startModelSetup(setupButton.closest("[data-setup-message-id]")); return; }
+  const remoteSetupButton = event.target.closest("[data-remote-setup-action]");
+  if (remoteSetupButton) {
+    const card = remoteSetupButton.closest("[data-remote-setup-message-id]");
+    if (remoteSetupButton.dataset.remoteSetupAction === "save") saveRemoteModelSetup(card);
+    if (remoteSetupButton.dataset.remoteSetupAction === "test") testRemoteModelSetup(card);
+    return;
+  }
   const button = event.target.closest("[data-plan-action]");
   if (button) handleAgentPlanAction(button);
 });
 elements.agentModelButton.addEventListener("click", () => setAgentModelMenu(elements.agentModelMenu.hidden));
 elements.agentModelMenu.addEventListener("click", (event) => {
   const configure = event.target.closest("[data-config-model]");
-  if (configure && !configure.disabled) { openPcAgentSetup(); return; }
+  if (configure && !configure.disabled) {
+    if (configure.dataset.configModel === "remote-api") openRemoteModelSetup();
+    else openPcAgentSetup();
+    return;
+  }
   const option = event.target.closest("[data-model-option]");
   if (option) selectAgentModel(option.dataset.modelOption);
 });

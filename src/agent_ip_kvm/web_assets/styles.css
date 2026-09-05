@@ -347,6 +347,10 @@ body.agent-mode .agent-shell { transform: translateX(0); }
 .model-setup-fields select:focus, .model-setup-fields input:focus { border-color: rgba(105,224,163,.5); }
 .model-setup-start { justify-self: end; min-width: 100px; height: 36px; padding: 0 14px; border: 0; border-radius: 5px; color: #07120d; background: var(--accent); cursor: pointer; font-weight: 700; }
 .model-setup-start:disabled { opacity: .45; cursor: wait; }
+.model-setup-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.model-setup-test { min-width: 100px; height: 36px; padding: 0 14px; border: 1px solid rgba(105,224,163,.45); border-radius: 5px; color: #b9f5d5; background: transparent; cursor: pointer; font-weight: 700; }
+.model-setup-test:disabled { opacity: .45; cursor: wait; }
+.model-setup-result { color: #9de8bb !important; }
 .model-setup-progress { height: 7px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.08); }
 .model-setup-progress span { display: block; height: 100%; width: var(--progress, 0%); background: var(--accent); transition: width 250ms ease; }
 .model-setup-status { display: flex; justify-content: space-between; gap: 12px; color: #96a3b3; font-size: 11px; }
