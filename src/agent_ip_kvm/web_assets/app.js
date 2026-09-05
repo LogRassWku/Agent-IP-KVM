@@ -6,7 +6,7 @@ const elements = {
   settingsButton: document.querySelector("#settings-button"),
   closeSettings: document.querySelector("#close-settings"),
   refreshButton: document.querySelector("#refresh-button"),
-  fullscreenButton: document.querySelector("#fullscreen-button"),
+  screenButton: document.querySelector("#screen-button"),
   videoShell: document.querySelector("#video-shell"),
   v4l2Message: document.querySelector("#v4l2-message"),
   deviceCount: document.querySelector("#device-count"),
@@ -103,7 +103,7 @@ elements.videoFrame.addEventListener("error", () => {
   elements.noSignal.hidden = false;
   refreshStatus();
 });
-elements.fullscreenButton.addEventListener("click", async () => {
+elements.screenButton.addEventListener("click", async () => {
   if (document.fullscreenElement) await document.exitFullscreen();
   else await elements.videoShell.requestFullscreen();
 });

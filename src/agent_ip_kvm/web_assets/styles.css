@@ -47,6 +47,8 @@ button { color: inherit; font: inherit; }
 
 .tool-button { gap: 7px; min-height: 38px; padding: 0 11px; color: #c9d1dc; font-size: 13px; }
 .tool-button:hover, .tool-button:focus-visible, .icon-button:hover, .icon-button:focus-visible { border-color: var(--line); background: var(--panel-strong); outline: none; }
+.tool-button:disabled { color: #697384; cursor: default; }
+.tool-button:disabled:hover { border-color: transparent; background: transparent; }
 .tool-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .workspace { height: 100vh; padding-top: var(--topbar-height); }
