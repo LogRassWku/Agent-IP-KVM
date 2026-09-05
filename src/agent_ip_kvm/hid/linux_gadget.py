@@ -168,13 +168,13 @@ class LinuxGadgetHidAdapter(HidAdapter):
     def __init__(
         self,
         keyboard_path: Path,
-        mouse_path: Path,
+        mouse_path: Path | None,
         writer_factory: Callable[[Path], ReportWriter] = _FdReportWriter,
         *,
         pointer_path: Path | None = None,
     ) -> None:
         self._keyboard_path = Path(keyboard_path)
-        self._mouse_path = Path(mouse_path)
+        self._mouse_path = Path(mouse_path) if mouse_path is not None else None
         self._pointer_path = Path(pointer_path) if pointer_path is not None else None
         self._writer_factory = writer_factory
         self._keyboard_writer: ReportWriter | None = None
@@ -232,6 +232,8 @@ class LinuxGadgetHidAdapter(HidAdapter):
         )
 
     def _write_mouse(self, delta_x: int = 0, delta_y: int = 0, wheel: int = 0) -> None:
+        if self._mouse_path is None:
+            raise HidError("relative mouse HID device is not configured")
         self._ensure_writer("_mouse_writer", self._mouse_path, "mouse")
         self._write_one(
             self._mouse_writer,
@@ -263,10 +265,9 @@ class LinuxGadgetHidAdapter(HidAdapter):
     def arm(self) -> None:
         if self._state is HidState.READY:
             return
-        candidates = [
-            ("_keyboard_writer", self._keyboard_path),
-            ("_mouse_writer", self._mouse_path),
-        ]
+        candidates = [("_keyboard_writer", self._keyboard_path)]
+        if self._mouse_path is not None:
+            candidates.append(("_mouse_writer", self._mouse_path))
         if self._pointer_path is not None:
             candidates.append(("_pointer_writer", self._pointer_path))
         for attribute, path in candidates:

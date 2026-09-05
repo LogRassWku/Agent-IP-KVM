@@ -198,7 +198,7 @@ class WebInterfaceTests(unittest.TestCase):
         controller = AutoLinuxHidController(resolver, factory)
         self.assertEqual(controller.status()["state"], "disconnected")
 
-        current["devices"] = ("keyboard", "mouse", "pointer")
+        current["devices"] = ("keyboard", None, "pointer")
         self.assertTrue(controller.status()["enabled"])
         controller.tap_key({"key": "a", "modifiers": []})
         self.assertEqual(adapters[0].pressed_keys, frozenset())

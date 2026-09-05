@@ -57,6 +57,7 @@ Wants=hobot-usb-gadget.service
 
 [Service]
 Type=oneshot
+Environment=AGENT_IP_KVM_INCLUDE_RELATIVE_MOUSE=0
 ExecStart=/usr/local/lib/agent-ip-kvm/apply-hid-gadget.sh --apply
 RemainAfterExit=yes
 

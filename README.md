@@ -14,7 +14,7 @@ RDK X5 是第一个开发与验证平台，但核心软件不绑定单一型号�
 - 最小浏览器界面已经能持续显示 UGREEN 25854 的 1920×1080、30 fps MJPEG 画面，并直接转发 JPEG 帧以避免二次编码。
 - 已加入只读 USB Gadget HID 探测工具，并在保留管理网络的情况下完成 Windows 键盘／鼠标枚举和自动回滚。
 - 已建立平台无关的 HID 接口、内存模拟后端和 Linux USB Gadget 后端；RDK X5 已通过 Web 接口向测试电脑发送并释放一个小写 `a`，由 HDMI 回传画面确认字符进入记事本。
-- Web 服务会自动发现已配置并可写的 Linux Gadget 键盘、相对鼠标和绝对指针端点；鼠标进入视频画面后会直接同步绝对位置，并支持左／中／右键点击和滚轮，真实绝对坐标闭环仍待实测。
+- Web 服务会自动发现已配置并可写的 Linux Gadget 键盘和绝对指针端点；相对鼠标按平台端点能力选配。鼠标进入视频画面后会直接同步绝对位置，并支持左／中／右键点击和滚轮。
 - RDK X5 已安装并实测 `Qwen2.5-1.5B-Instruct Q4_K_M` 板端模型；首轮只读结构化输出可用，常驻模型 API 尚未接入项目。
 
 UGREEN 25854 在 RDK X5 上需要保持 USB 设备唤醒；实测自动休眠会造成 HDMI 热插拔状态反复变化。仓库已提供可安装、可移除的 udev 电源规则。
@@ -95,7 +95,7 @@ PYTHONPATH=src python -m agent_ip_kvm.hid_cli \
 sudo sh scripts/install-hid-gadget-service.sh
 ```
 
-服务会等待厂商 USB Gadget 配置完成，在保留现有功能的基础上加入项目自己的标准键盘、相对鼠标和绝对指针，并支持从旧的双 HID 配置升级。撤销时运行 `sudo sh scripts/install-hid-gadget-service.sh --remove`，它只移除项目创建的 HID 功能和服务文件。
+服务会等待厂商 USB Gadget 配置完成，在保留现有功能的基础上加入项目自己的标准键盘和绝对指针。RDK X5 默认不挂载相对鼠标端点，以避开复合 Gadget 的端点资源限制；软件适配层仍支持其他开发板启用相对鼠标。撤销时运行 `sudo sh scripts/install-hid-gadget-service.sh --remove`。
 
 RDK X5 已在 Windows 电脑上完成一次 45 秒实测：系统正常识别 `HID Keyboard Device` 和 `HID-compliant mouse`，原有 RNDIS 与只读存储同时保留；自动回滚后两个 HID 接口消失，QuickLink 和 Web 服务恢复。测试没有发送任何按键或鼠标报告。
 
@@ -149,7 +149,7 @@ sudo sh scripts/install-uvc-power-rule.sh --remove
 
 顶部栏显示刷新、鼠标、键盘、屏幕和设置按钮，不显示项目标题或品牌图标。视频区域左下角的两个按钮可把浏览器画面缩放到 50% 至 200%；屏幕菜单只选择采集设备实际支持的 MJPEG 分辨率和刷新率。缩放画面不会移动顶部工具栏或左下角按钮。鼠标菜单可以调整画面内的光标大小。网页打开且 HID 可用时，鼠标一进入实际视频画面就会自动把位置换算为绝对坐标，并同步位置、点击和滚轮，不需要点击开始按钮。键盘按钮会打开触屏屏幕键盘。
 
-Linux 上默认使用 `auto` 后端：只有 USB 主机已经配置 Gadget 且键盘、相对鼠标和绝对指针端点都可写时，页面才会自动启用 HID；断开时会释放输入并恢复为未连接。为 Web 服务账号安装端点权限规则：
+Linux 上默认使用 `auto` 后端：USB 主机已配置 Gadget 且键盘、绝对指针端点均可写时，页面自动启用 HID；相对鼠标端点允许缺省。断开时会释放输入并恢复为未连接。为 Web 服务账号安装端点权限规则：
 
 ```bash
 sudo sh scripts/install-hid-access-rule.sh sunrise
