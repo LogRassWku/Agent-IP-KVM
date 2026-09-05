@@ -83,6 +83,7 @@ apply_hid() {
        [ -L "$CONFIG/$KEYBOARD_FUNCTION" ] && \
        [ -L "$CONFIG/$POINTER_FUNCTION" ] && \
        [ ! -L "$CONFIG/$MOUSE_FUNCTION" ] && \
+       [ ! -d "$GADGET/functions/$MOUSE_FUNCTION" ] && \
        [ "$(cat "$GADGET/functions/$KEYBOARD_FUNCTION/no_out_endpoint" 2>/dev/null || echo 0)" = 1 ] && \
        [ "$(cat "$GADGET/functions/$POINTER_FUNCTION/no_out_endpoint" 2>/dev/null || echo 0)" = 1 ] && \
        cmp -s "$SCRIPT_DIR/pointer-report-desc.bin" "$GADGET/functions/$POINTER_FUNCTION/report_desc"; then
@@ -168,6 +169,9 @@ apply_hid() {
     rm -f "$CONFIG/$KEYBOARD_FUNCTION" "$CONFIG/$MOUSE_FUNCTION" "$CONFIG/$POINTER_FUNCTION"
     if [ "$RECREATE_POINTER" -eq 1 ]; then
         rmdir "$GADGET/functions/$POINTER_FUNCTION"
+    fi
+    if [ "$INCLUDE_RELATIVE_MOUSE" -eq 0 ] && [ -d "$GADGET/functions/$MOUSE_FUNCTION" ]; then
+        rmdir "$GADGET/functions/$MOUSE_FUNCTION"
     fi
 
     if [ "$CREATE_KEYBOARD" -eq 1 ]; then
