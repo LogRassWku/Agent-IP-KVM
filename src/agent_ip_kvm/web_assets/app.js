@@ -439,7 +439,11 @@ async function toggleStickyKeys() {
   const modifiers = [...activeModifiers];
   elements.stickyKeys.disabled = true;
   try {
-    for (const key of keys) await postJson("/api/hid/key", { key, modifiers });
+    if (keys.length > 0) {
+      for (const key of keys) await postJson("/api/hid/key", { key, modifiers });
+    } else {
+      for (const modifier of modifiers) await postJson("/api/hid/key", { key: modifier, modifiers: [] });
+    }
   } catch (error) {
     console.warn("Unable to send sticky keys", error);
     await refreshStatus();
@@ -523,6 +527,15 @@ async function tapKey(button) {
   finally { button.disabled = !hidEnabled; clearModifiers(); }
 }
 
+async function tapModifier(button) {
+  if (!hidEnabled) return;
+  button.disabled = true;
+  try {
+    await postJson("/api/hid/key", { key: button.dataset.modifier, modifiers: [] });
+  } catch (error) { console.warn("Unable to send HID modifier", error); await refreshStatus(); }
+  finally { button.disabled = !hidEnabled; }
+}
+
 elements.settingsButton.addEventListener("click", () => { setScreenMenu(false); setKeyboard(false); setPanel(true); });
 elements.closeSettings.addEventListener("click", () => setPanel(false));
 elements.backdrop.addEventListener("click", () => setPanel(false));
@@ -596,7 +609,8 @@ elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {
   const button = event.target.closest("button"); if (!button || button.disabled) return;
   if (button === elements.stickyKeys) toggleStickyKeys();
-  else if (button.dataset.modifier) toggleModifier(button.dataset.modifier);
+  else if (button.dataset.modifier && stickyKeysEnabled) toggleModifier(button.dataset.modifier);
+  else if (button.dataset.modifier) tapModifier(button);
   else if (button.dataset.key && stickyKeysEnabled) queueStickyKey(button);
   else if (button.dataset.key) tapKey(button);
 });

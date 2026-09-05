@@ -153,6 +153,23 @@ class WebInterfaceTests(unittest.TestCase):
         )
         self.assertEqual(adapter.pressed_keys, frozenset())
 
+    def test_hid_controller_taps_standalone_modifier(self) -> None:
+        adapter = SimulatedHidAdapter()
+        controller = HidWebController(adapter, backend="simulated")
+
+        result = controller.tap_key({"key": "win", "modifiers": []})
+
+        self.assertEqual(result, {"key": "win", "modifiers": []})
+        self.assertEqual(
+            [event.kind for event in adapter.events],
+            [
+                SimulatedEventKind.ARMED,
+                SimulatedEventKind.KEY_DOWN,
+                SimulatedEventKind.KEY_UP,
+            ],
+        )
+        self.assertEqual(adapter.pressed_keys, frozenset())
+
     def test_hid_controller_rejects_unknown_keys_before_output(self) -> None:
         adapter = SimulatedHidAdapter()
         controller = HidWebController(adapter, backend="simulated")

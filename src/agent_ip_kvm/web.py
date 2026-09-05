@@ -157,7 +157,9 @@ class HidWebController:
         adapter = self._require_adapter()
         key = payload.get("key")
         modifiers = payload.get("modifiers", [])
-        if not isinstance(key, str) or key not in KEY_USAGES:
+        if not isinstance(key, str) or (
+            key not in KEY_USAGES and key not in self._MODIFIERS
+        ):
             raise ValueError("unsupported key")
         if not isinstance(modifiers, list) or any(
             not isinstance(item, str) or item not in self._MODIFIERS for item in modifiers
