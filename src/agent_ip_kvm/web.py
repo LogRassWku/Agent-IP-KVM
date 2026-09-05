@@ -28,7 +28,7 @@ from .video import (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class WebConfig:
     source_kind: str = "synthetic"
     file_path: str | None = None
@@ -110,6 +110,9 @@ class StreamProvider(Protocol):
     def status(self) -> dict[str, object]: ...
 
     def close(self) -> None: ...
+
+
+SettingsUpdater = Callable[[dict[str, object]], dict[str, object]]
 
 
 class _FFmpegJPEGEncoder:
@@ -241,17 +244,23 @@ class VideoStreamController:
         self._error: str | None = None
         self._sequence = -1
         self._jpeg: bytes | None = None
+        self._generation = 0
 
     def frames(self) -> Iterator[tuple[int, bytes]]:
         self._ensure_started()
         last_sequence = -1
+        with self._condition:
+            generation = self._generation
         while True:
             with self._condition:
                 self._condition.wait_for(
                     lambda: self._sequence != last_sequence
-                    or self._state in self._TERMINAL_STATES,
+                    or self._state in self._TERMINAL_STATES
+                    or self._generation != generation,
                     timeout=5,
                 )
+                if self._generation != generation:
+                    return
                 if self._sequence != last_sequence and self._jpeg is not None:
                     last_sequence = self._sequence
                     current = (last_sequence, self._jpeg)
@@ -279,6 +288,29 @@ class VideoStreamController:
         thread = self._thread
         if thread is not None:
             thread.join(timeout=3)
+
+    def update_mode(self, width: int, height: int, fps: float) -> None:
+        self._stop_event.set()
+        with self._condition:
+            self._condition.notify_all()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=3)
+            if thread.is_alive():
+                raise VideoSourceError("video source did not stop before reconfiguration")
+        with self._condition:
+            self._config.width = width
+            self._config.height = height
+            self._config.fps = fps
+            self._thread = None
+            self._generation += 1
+            self._sequence = -1
+            self._jpeg = None
+            self._state = "idle"
+            self._message = "等待浏览器连接"
+            self._error = None
+            self._stop_event.clear()
+            self._condition.notify_all()
 
     def _ensure_started(self) -> None:
         with self._condition:
@@ -341,6 +373,7 @@ def create_handler(
     *,
     status_provider: Callable[[WebConfig], dict[str, object]] = collect_status,
     stream_provider: StreamProvider | None = None,
+    settings_updater: SettingsUpdater | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     stream = stream_provider or VideoStreamController(config)
     assets = {
@@ -368,12 +401,43 @@ def create_handler(
             name, content_type = asset
             self._send_bytes(_read_asset(name), content_type)
 
-        def _send_json(self, payload: dict[str, object]) -> None:
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self._send_bytes(body, "application/json; charset=utf-8")
+        def do_POST(self) -> None:
+            path = urlsplit(self.path).path
+            if path != "/api/video-settings" or settings_updater is None:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if length <= 0 or length > 4096:
+                self._send_json({"error": "invalid request body"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("request body must be a JSON object")
+                video = settings_updater(payload)
+            except (json.JSONDecodeError, TypeError, ValueError, VideoSourceError) as exc:
+                self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json({"video": video})
 
-        def _send_bytes(self, body: bytes, content_type: str) -> None:
-            self.send_response(HTTPStatus.OK)
+        def _send_json(
+            self,
+            payload: dict[str, object],
+            status: HTTPStatus = HTTPStatus.OK,
+        ) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8", status)
+
+        def _send_bytes(
+            self,
+            body: bytes,
+            content_type: str,
+            status: HTTPStatus = HTTPStatus.OK,
+        ) -> None:
+            self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
@@ -413,8 +477,44 @@ class KVMHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, server_address: tuple[str, int], config: WebConfig) -> None:
+        self.config = config
         self.stream_controller = VideoStreamController(config)
-        super().__init__(server_address, create_handler(config, stream_provider=self.stream_controller))
+        super().__init__(
+            server_address,
+            create_handler(
+                config,
+                stream_provider=self.stream_controller,
+                settings_updater=self.update_video_settings,
+            ),
+        )
+
+    def update_video_settings(self, payload: dict[str, object]) -> dict[str, object]:
+        if self.config.source_kind != "v4l2":
+            raise ValueError("current video source does not support mode changes")
+        try:
+            width = int(payload["width"])
+            height = int(payload["height"])
+            fps = float(payload["fps"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("width, height, and fps are required") from exc
+
+        report = discover_v4l2_devices(device_paths=(self.config.device_path,))
+        device = next(
+            (item for item in report.devices if item.device_path == self.config.device_path),
+            None,
+        )
+        supported = device is not None and any(
+            mode.width == width
+            and mode.height == height
+            and abs(mode.fps - fps) < 0.01
+            and mode.pixel_format in {"MJPG", "MJPEG"}
+            for mode in device.capabilities
+        )
+        if not supported:
+            raise ValueError("selected MJPEG mode is not supported by the capture device")
+
+        self.stream_controller.update_mode(width, height, fps)
+        return {"width": width, "height": height, "fps": fps}
 
     def server_close(self) -> None:
         self.stream_controller.close()

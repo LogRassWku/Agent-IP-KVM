@@ -1,7 +1,7 @@
 import json
 import threading
 import unittest
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from agent_ip_kvm.video import EndOfStream, Frame, SourceCapability, SourceHealth
 from agent_ip_kvm.web import VideoStreamController, WebConfig, create_server
@@ -82,6 +82,9 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertIn('id="mouse-button"', page)
             self.assertIn('id="keyboard-button"', page)
             self.assertIn('id="screen-button"', page)
+            self.assertIn('id="screen-menu"', page)
+            self.assertIn('id="resolution-select"', page)
+            self.assertIn('id="refresh-rate-select"', page)
             self.assertNotIn('id="fullscreen-button"', page)
             self.assertIn("鼠标", page)
             self.assertIn("键盘", page)
@@ -121,6 +124,42 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertIn(b"Content-Type: image/jpeg", body)
             self.assertIn(b"X-Sequence: 7", body)
             self.assertIn(b"\xff\xd8test\xff\xd9", body)
+
+    def test_accepts_supported_video_setting_update(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        from agent_ip_kvm.web import create_handler
+        from http.server import ThreadingHTTPServer
+
+        updates = []
+
+        def update(payload):
+            updates.append(payload)
+            return payload
+
+        self.server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            create_handler(
+                WebConfig(),
+                stream_provider=StaticStream(),
+                settings_updater=update,
+            ),
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+        request = Request(
+            f"{self.base_url}/api/video-settings",
+            data=json.dumps({"width": 1280, "height": 720, "fps": 60}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["video"]["fps"], 60)
+        self.assertEqual(updates, [{"width": 1280, "height": 720, "fps": 60}])
 
     def test_stream_controller_reports_file_end_after_last_frame(self) -> None:
         controller = VideoStreamController(

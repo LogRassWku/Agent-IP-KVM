@@ -22,10 +22,20 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M6.5 9h.01M10.2 9h.01M13.8 9h.01M17.5 9h.01M6.5 12h.01M10.2 12h.01M13.8 12h.01M17.5 12h.01M7 15.5h10"/></svg>
           <span>键盘</span>
         </button>
-        <button class="tool-button" id="screen-button" type="button" title="屏幕显示">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="14" rx="2"/><path d="M8 21h8M12 17.5V21"/></svg>
-          <span>屏幕</span>
-        </button>
+        <div class="tool-menu">
+          <button class="tool-button" id="screen-button" type="button" title="屏幕设置" aria-expanded="false" aria-controls="screen-menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="14" rx="2"/><path d="M8 21h8M12 17.5V21"/></svg>
+            <span>屏幕</span>
+          </button>
+          <section class="screen-menu" id="screen-menu" aria-label="屏幕设置" hidden>
+            <label for="resolution-select">分辨率</label>
+            <select id="resolution-select"></select>
+            <label for="refresh-rate-select">刷新率</label>
+            <select id="refresh-rate-select"></select>
+            <p class="screen-message" id="screen-message" aria-live="polite"></p>
+            <button class="apply-button" id="apply-screen-settings" type="button">应用</button>
+          </section>
+        </div>
         <button class="tool-button" id="settings-button" type="button" title="设备信息" aria-expanded="false" aria-controls="settings-panel">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
           <span>设置</span>

@@ -34,9 +34,10 @@ button { color: inherit; font: inherit; }
   backdrop-filter: blur(16px);
 }
 
-.tools, .tool-button, .section-title-row, .no-signal { display: flex; align-items: center; }
+.tools, .tool-menu, .tool-button, .section-title-row, .no-signal { display: flex; align-items: center; }
 
 .tools { gap: 6px; }
+.tool-menu { position: relative; }
 
 .tool-button, .icon-button {
   border: 1px solid transparent;
@@ -50,6 +51,44 @@ button { color: inherit; font: inherit; }
 .tool-button:disabled { color: #697384; cursor: default; }
 .tool-button:disabled:hover { border-color: transparent; background: transparent; }
 .tool-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.screen-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 25;
+  width: 232px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #111722;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.42);
+}
+.screen-menu[hidden] { display: none; }
+.screen-menu label { display: block; margin: 0 0 6px; color: var(--muted); font-size: 11px; }
+.screen-menu select {
+  width: 100%;
+  height: 36px;
+  margin: 0 0 13px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #dfe5ec;
+  background: #0b1018;
+  font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.screen-message { min-height: 17px; margin: 0 0 9px; color: #ff8791; font-size: 11px; line-height: 1.45; }
+.apply-button {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  color: #07120d;
+  background: var(--accent);
+  cursor: pointer;
+  font-weight: 700;
+}
+.apply-button:disabled { color: #8b94a2; background: #29313d; cursor: default; }
 
 .workspace { height: 100vh; padding-top: var(--topbar-height); }
 
