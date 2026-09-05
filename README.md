@@ -87,7 +87,15 @@ PYTHONPATH=src python -m agent_ip_kvm.hid_cli \
   --write-recovery-bundle ./hid-recovery
 ```
 
-文件包包含状态清单、只读预检查、回滚脚本、临时枚举脚本和本地恢复说明。回滚与临时枚举脚本默认都只显示计划；临时枚举只有显式运行 `sudo ./temporary-apply.sh --apply 45` 才会重绑 USB，并会在 45 秒后自动恢复。该脚本只建立键盘和鼠标接口，不打开 `/dev/hidg*`，因此不会发送输入。持久化应用尚未实现。
+文件包包含状态清单、只读预检查、回滚脚本、临时枚举脚本和本地恢复说明。回滚与临时枚举脚本默认都只显示计划；临时枚举只有显式运行 `sudo ./temporary-apply.sh --apply 45` 才会重绑 USB，并会在 45 秒后自动恢复。该脚本只建立键盘和鼠标接口，不打开 `/dev/hidg*`，因此不会发送输入。
+
+临时枚举验证通过后，可以安装开机自动配置服务：
+
+```bash
+sudo sh scripts/install-hid-gadget-service.sh
+```
+
+服务会等待厂商 USB Gadget 配置完成，在保留现有功能的基础上加入项目自己的标准键盘和相对鼠标，并支持重复执行。撤销时运行 `sudo sh scripts/install-hid-gadget-service.sh --remove`，它只移除项目创建的两个 HID 功能和服务文件。RDK X5 已完成实际重启验证，开机后保留 `ECM`、`RNDIS` 和只读存储，同时自动恢复键盘与鼠标。
 
 RDK X5 已在 Windows 电脑上完成一次 45 秒实测：系统正常识别 `HID Keyboard Device` 和 `HID-compliant mouse`，原有 RNDIS 与只读存储同时保留；自动回滚后两个 HID 接口消失，QuickLink 和 Web 服务恢复。测试没有发送任何按键或鼠标报告。
 
@@ -158,7 +166,7 @@ PYTHONPATH=src python -m agent_ip_kvm.web \
   --hid-backend simulated
 ```
 
-Linux USB Gadget 后端还需要已经存在的 `hid.keyboard` 和 `hid.mouse` ConfigFS 功能。正式环境开放真实输入前仍需完成认证和单一控制者机制。
+Linux USB Gadget 后端需要已经存在的 `hid.keyboard` 和 `hid.mouse` ConfigFS 功能；上述持久化服务可以在 RDK X5 上自动建立它们。正式环境开放真实输入前仍需完成认证和单一控制者机制。
 
 RDK X5 已完成一次受保护的真实 Web 键盘验证：开发板通过 Wi-Fi 保持独立管理，QuickLink Type-C 连接目标笔记本；180 秒自动回滚窗口内发送一个小写 `a`，并由 HDMI 回传画面确认字符进入空白记事本。验证后提前回滚，Web HID 恢复默认关闭。
 
