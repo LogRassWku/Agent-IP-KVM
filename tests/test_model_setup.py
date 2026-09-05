@@ -33,7 +33,7 @@ class ModelSetupStoreTests(unittest.TestCase):
         secret = bootstrap_path.removesuffix(".ps1").rsplit("/", 1)[-1]
         script = self.store.bootstrap(
             created["task_id"], secret, base_url="http://192.168.128.10:8765", token="t" * 64
-        ).decode("utf-8-sig")
+        ).decode("utf-8")
         self.assertIn("qwen3.5:9b", script)
         self.assertIn("https://ollama.com/install.ps1", script)
         self.assertIn("t" * 64, script)

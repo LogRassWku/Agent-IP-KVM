@@ -182,7 +182,8 @@ class ModelSetupStore:
         template = Path(__file__).with_name("pc_agent_install.ps1").read_text(encoding="utf-8")
         for marker, value in values.items():
             template = template.replace(marker, value)
-        return template.encode("utf-8-sig")
+        # Invoke-Expression treats a UTF-8 BOM as part of the first identifier.
+        return template.encode("utf-8")
 
     def bootstrap_path(self, task_id: str) -> str:
         with self._lock:
