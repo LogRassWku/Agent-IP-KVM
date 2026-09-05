@@ -37,6 +37,15 @@ esac
 id "$SERVICE_USER" >/dev/null 2>&1 || { echo "Unknown service user: $SERVICE_USER" >&2; exit 2; }
 [ -f "$PROJECT_DIR/src/agent_ip_kvm/web.py" ] || { echo "Agent IP KVM project was not found: $PROJECT_DIR" >&2; exit 2; }
 PYTHON3=$(command -v python3)
+DATA_DIR="$PROJECT_DIR/data"
+TOKEN_FILE="$DATA_DIR/pc-agent-token"
+install -d -m 0700 -o "$SERVICE_USER" -g "$(id -gn "$SERVICE_USER")" "$DATA_DIR"
+if [ ! -s "$TOKEN_FILE" ]; then
+    umask 077
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$TOKEN_FILE"
+fi
+chown "$SERVICE_USER:$(id -gn "$SERVICE_USER")" "$TOKEN_FILE"
+chmod 0600 "$TOKEN_FILE"
 
 systemctl disable --now "$UNIT_NAME" 2>/dev/null || true
 pkill -f '[p]ython3 -m agent_ip_kvm.web' 2>/dev/null || true
@@ -52,7 +61,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$PROJECT_DIR
 Environment=PYTHONPATH=$PROJECT_DIR/src
-ExecStart=$PYTHON3 -m agent_ip_kvm.web --host 0.0.0.0 --port 8765 --source v4l2 --device /dev/video0 --width 1920 --height 1080 --fps 30 --enable-hid --hid-backend auto
+ExecStart=$PYTHON3 -m agent_ip_kvm.web --host 0.0.0.0 --port 8765 --source v4l2 --device /dev/video0 --width 1920 --height 1080 --fps 30 --enable-hid --hid-backend auto --host-info-file $DATA_DIR/controlled-host.json --audit-file $DATA_DIR/audit.jsonl --pc-agent-token-file $TOKEN_FILE --pc-agent-suggestion-file $DATA_DIR/pc-agent-suggestion.json
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=10

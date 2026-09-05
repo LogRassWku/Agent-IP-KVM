@@ -170,6 +170,21 @@ Linux USB Gadget 后端需要已经存在的 `hid.keyboard` 和 `hid.mouse` Conf
 
 RDK X5 已完成一次受保护的真实 Web 键盘验证：开发板通过 Wi-Fi 保持独立管理，QuickLink Type-C 连接目标笔记本；180 秒自动回滚窗口内发送一个小写 `a`，并由 HDMI 回传画面确认字符进入空白记事本。验证后提前回滚，Web HID 自动回到断开状态。
 
+## Agent 安全闭环
+
+Agent 页面现在会把自然语言任务转换为白名单动作计划。只读观察自动取得一张 JPEG 并立即释放按需采集；键盘动作以及包含 BIOS、安装、重启、磁盘或固件语义的任务会显示风险与计划校验摘要，只有用户点击“批准并执行”后才能继续。执行结果和动作后画面摘要显示在同一会话中。
+
+主要接口如下：
+
+- `GET /api/video/snapshot.jpg`：取得一张当前画面；
+- `POST /api/agent/plans`：生成经过结构校验的动作计划；
+- `POST /api/agent/approve`、`/api/agent/reject`：按计划 ID 和摘要批准或拒绝；
+- `POST /api/agent/execute`：执行已满足审批条件的计划；
+- `GET /api/agent/audit`：读取最近的结构化审计事件；
+- `POST /api/pc-agent/suggestions`：接收经过配对认证的 PC Agent 建议和资料来源。
+
+首版识别器只会明确识别内置模拟测试图。真实 HDMI 截图会返回 `unknown`，供后续 OCR、固定 BIOS 页面识别或经过用户授权的视觉模型处理。当前规则规划器用于验证审批边界，Qwen2.5 本地模型尚未接入执行路径。
+
 在 RDK X5 上安装 Web 开机服务：
 
 ```bash
@@ -187,6 +202,14 @@ powershell -ExecutionPolicy Bypass -File scripts/report-windows-host-info.ps1 -K
 ```
 
 脚本把系统、整机型号、BIOS、CPU、GPU、内存频率、物理磁盘、分区和网络地址发送给开发板。开发板验证后保存为 `data/controlled-host.json`，设置面板和未来的板载 Agent 读取同一文件。详细字段和数据流见 `docs/HOST_INFO.md`。
+
+安装 Web 服务后，PC Agent 配对令牌保存在开发板的 `data/pc-agent-token`，权限为 `0600`，不会写入 Git。再次上报主机信息时通过安全方式把令牌交给探针：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/report-windows-host-info.ps1 `
+  -KvmUrl http://开发板地址:8765 `
+  -PairingToken "从开发板读取的配对令牌"
+```
 
 ## 计划架构
 

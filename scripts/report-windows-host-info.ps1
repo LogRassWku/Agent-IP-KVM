@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$KvmUrl,
-    [string]$OutputFile
+    [string]$OutputFile,
+    [string]$PairingToken
 )
 
 $ErrorActionPreference = "Stop"
@@ -141,6 +142,13 @@ if ($OutputFile) {
 }
 
 $uri = $KvmUrl.TrimEnd("/") + "/api/host-info"
-$result = Invoke-RestMethod -Uri $uri -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json))
+$request = @{
+    Uri = $uri
+    Method = "Post"
+    ContentType = "application/json; charset=utf-8"
+    Body = [System.Text.Encoding]::UTF8.GetBytes($json)
+}
+if ($PairingToken) { $request.Headers = @{ Authorization = "Bearer $PairingToken" } }
+$result = Invoke-RestMethod @request
 Write-Host "Host information sent to $uri"
 Write-Host "Collected at: $($result.controlled_host.updated_at)"

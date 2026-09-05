@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import shutil
@@ -18,6 +19,15 @@ from typing import Callable, Iterator, Protocol
 from urllib.parse import urlsplit
 
 from . import __version__
+from .agent_control import (
+    AgentConflictError,
+    AgentControlError,
+    AgentCoordinator,
+    AuditLog,
+    PcAgentSuggestionStore,
+    PeerAuthenticationError,
+    PeerTokenAuthenticator,
+)
 from .host_info import HostInfoStore
 from .hid import (
     HidAdapter,
@@ -49,6 +59,9 @@ class WebConfig:
     height: int = 1080
     fps: float = 30.0
     host_info_path: Path = Path("data/controlled-host.json")
+    audit_path: Path = Path("data/audit.jsonl")
+    pc_agent_token_path: Path = Path("data/pc-agent-token")
+    pc_agent_suggestion_path: Path = Path("data/pc-agent-suggestion.json")
 
 
 def _make_source(config: WebConfig) -> VideoSource:
@@ -121,6 +134,8 @@ class StreamProvider(Protocol):
     def frames(self) -> Iterator[tuple[int, bytes]]: ...
 
     def status(self) -> dict[str, object]: ...
+
+    def snapshot(self) -> tuple[bytes, dict[str, object]]: ...
 
     def pause(self) -> None: ...
 
@@ -504,6 +519,7 @@ class VideoStreamController:
         self._source_factory = source_factory
         self._encoder_factory = encoder_factory
         self._condition = threading.Condition()
+        self._capture_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._state = "idle"
@@ -511,6 +527,7 @@ class VideoStreamController:
         self._error: str | None = None
         self._sequence = -1
         self._jpeg: bytes | None = None
+        self._frame_metadata: dict[str, object] | None = None
         self._generation = 0
 
     def frames(self) -> Iterator[tuple[int, bytes]]:
@@ -548,6 +565,46 @@ class VideoStreamController:
                 "error": self._error,
             }
 
+    def snapshot(self) -> tuple[bytes, dict[str, object]]:
+        """Return one JPEG and release the source when no live stream exists."""
+        with self._condition:
+            if self._jpeg is not None and self._frame_metadata is not None:
+                jpeg = self._jpeg
+                metadata = dict(self._frame_metadata)
+                metadata["on_demand"] = False
+                metadata["sha256"] = hashlib.sha256(jpeg).hexdigest()
+                return jpeg, metadata
+
+        source: VideoSource | None = None
+        encoder: _FFmpegJPEGEncoder | _PassthroughJPEGEncoder | None = None
+        with self._capture_lock:
+            try:
+                source = self._source_factory(self._config)
+                mode = source.open()
+                encoder = (
+                    _PassthroughJPEGEncoder()
+                    if mode.pixel_format == "MJPEG"
+                    else self._encoder_factory(mode.width, mode.height, mode.fps)
+                )
+                source.start()
+                frame = source.next_frame()
+                jpeg = encoder.encode(frame)
+                return jpeg, {
+                    "source_id": source.source_id,
+                    "width": frame.width,
+                    "height": frame.height,
+                    "sequence": frame.sequence,
+                    "timestamp_ns": frame.timestamp_ns,
+                    "bytes": len(jpeg),
+                    "sha256": hashlib.sha256(jpeg).hexdigest(),
+                    "on_demand": True,
+                }
+            finally:
+                if source is not None:
+                    source.close()
+                if encoder is not None:
+                    encoder.close()
+
     def close(self) -> None:
         self._stop_event.set()
         with self._condition:
@@ -571,6 +628,7 @@ class VideoStreamController:
             self._generation += 1
             self._sequence = -1
             self._jpeg = None
+            self._frame_metadata = None
             self._state = "idle"
             self._message = "Agent 模式已释放视频采集"
             self._error = None
@@ -594,6 +652,7 @@ class VideoStreamController:
             self._generation += 1
             self._sequence = -1
             self._jpeg = None
+            self._frame_metadata = None
             self._state = "idle"
             self._message = "等待浏览器连接"
             self._error = None
@@ -610,6 +669,7 @@ class VideoStreamController:
             self._error = None
             self._sequence = -1
             self._jpeg = None
+            self._frame_metadata = None
             self._thread = threading.Thread(target=self._produce, daemon=True)
             self._thread.start()
 
@@ -617,21 +677,30 @@ class VideoStreamController:
         source: VideoSource | None = None
         encoder: _FFmpegJPEGEncoder | None = None
         try:
-            source = self._source_factory(self._config)
-            mode = source.open()
-            if mode.pixel_format == "MJPEG":
-                encoder = _PassthroughJPEGEncoder()
-            else:
-                encoder = self._encoder_factory(mode.width, mode.height, mode.fps)
-            source.start()
-            self._set_state("streaming", "视频流传输中")
-            while not self._stop_event.is_set():
-                frame = source.next_frame()
-                jpeg = encoder.encode(frame)
-                with self._condition:
-                    self._sequence = frame.sequence
-                    self._jpeg = jpeg
-                    self._condition.notify_all()
+            with self._capture_lock:
+                source = self._source_factory(self._config)
+                mode = source.open()
+                if mode.pixel_format == "MJPEG":
+                    encoder = _PassthroughJPEGEncoder()
+                else:
+                    encoder = self._encoder_factory(mode.width, mode.height, mode.fps)
+                source.start()
+                self._set_state("streaming", "视频流传输中")
+                while not self._stop_event.is_set():
+                    frame = source.next_frame()
+                    jpeg = encoder.encode(frame)
+                    with self._condition:
+                        self._sequence = frame.sequence
+                        self._jpeg = jpeg
+                        self._frame_metadata = {
+                            "source_id": source.source_id,
+                            "width": frame.width,
+                            "height": frame.height,
+                            "sequence": frame.sequence,
+                            "timestamp_ns": frame.timestamp_ns,
+                            "bytes": len(jpeg),
+                        }
+                        self._condition.notify_all()
         except EndOfStream:
             self._set_state("ended", "视频已结束")
         except (OSError, ValueError, RuntimeError) as exc:
@@ -652,6 +721,27 @@ class VideoStreamController:
             self._condition.notify_all()
 
 
+def observe_stream(stream: StreamProvider, config: WebConfig) -> dict[str, object]:
+    """Capture one frame and attach a conservative, pluggable state result."""
+    snapshot = getattr(stream, "snapshot", None)
+    if not callable(snapshot):
+        raise VideoSourceError("video source does not support snapshots")
+    _, metadata = snapshot()
+    if config.source_kind == "synthetic":
+        recognition = {
+            "state": "test_pattern",
+            "confidence": 1.0,
+            "evidence": ["deterministic synthetic color-bar source"],
+        }
+    else:
+        recognition = {
+            "state": "unknown",
+            "confidence": 0.0,
+            "evidence": ["frame captured; semantic recognizer is not configured"],
+        }
+    return {"frame": metadata, "recognition": recognition}
+
+
 def _read_asset(name: str) -> bytes:
     return files("agent_ip_kvm").joinpath("web_assets", name).read_bytes()
 
@@ -664,10 +754,22 @@ def create_handler(
     settings_updater: SettingsUpdater | None = None,
     hid_controller: HidWebController | None = None,
     host_info_store: HostInfoStore | None = None,
+    audit_log: AuditLog | None = None,
+    peer_authenticator: PeerTokenAuthenticator | None = None,
+    pc_agent_store: PcAgentSuggestionStore | None = None,
+    agent_coordinator: AgentCoordinator | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     stream = stream_provider or VideoStreamController(config)
     hid = hid_controller or HidWebController()
     host_info = host_info_store or HostInfoStore(config.host_info_path)
+    audit = audit_log or AuditLog(config.audit_path)
+    peer_auth = peer_authenticator or PeerTokenAuthenticator(config.pc_agent_token_path)
+    pc_agent = pc_agent_store or PcAgentSuggestionStore(config.pc_agent_suggestion_path)
+    agent = agent_coordinator or AgentCoordinator(
+        hid_controller=hid,
+        observe=lambda: observe_stream(stream, config),
+        audit_log=audit,
+    )
     assets = {
         "/": ("index.html", "text/html; charset=utf-8"),
         "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -686,7 +788,22 @@ def create_handler(
                 payload["stream"] = stream.status()
                 payload["hid"] = hid.status()
                 payload["controlled_host"] = host_info.status()
+                payload["pc_agent"] = {
+                    "pairing_enabled": peer_auth.enabled,
+                    **pc_agent.status(),
+                }
                 self._send_json(payload)
+                return
+            if path == "/api/video/snapshot.jpg":
+                self._send_snapshot()
+                return
+            if path == "/api/agent/audit":
+                self._send_json({"events": audit.recent()})
+                return
+            if path == "/api/pc-agent/status":
+                self._send_json(
+                    {"pairing_enabled": peer_auth.enabled, **pc_agent.status()}
+                )
                 return
             if path == "/api/stream.mjpg":
                 self._send_mjpeg()
@@ -709,6 +826,11 @@ def create_handler(
                 "/api/hid/mouse-position",
                 "/api/hid/mouse-click",
                 "/api/hid/release",
+                "/api/agent/plans",
+                "/api/agent/approve",
+                "/api/agent/reject",
+                "/api/agent/execute",
+                "/api/pc-agent/suggestions",
             }:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -733,7 +855,13 @@ def create_handler(
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = 0
-            maximum_length = 65536 if path == "/api/host-info" else 4096
+            maximum_length = (
+                65536
+                if path in {"/api/host-info", "/api/pc-agent/suggestions"}
+                else 32768
+                if path.startswith("/api/agent/")
+                else 4096
+            )
             if length < 0 or length > maximum_length or (
                 length == 0 and path not in {"/api/hid/release", "/api/video/pause"}
             ):
@@ -749,7 +877,9 @@ def create_handler(
                         return
                     result = {"video": settings_updater(payload)}
                 elif path == "/api/host-info":
+                    peer_auth.verify_if_enabled(self.headers.get("Authorization"))
                     result = {"controlled_host": host_info.update(payload)}
+                    audit.record("controlled_host_updated")
                 elif path == "/api/video/pause":
                     pause = getattr(stream, "pause", None)
                     if not callable(pause):
@@ -764,10 +894,33 @@ def create_handler(
                     result = {"hid": hid.position_mouse(payload)}
                 elif path == "/api/hid/mouse-click":
                     result = {"hid": hid.click_mouse(payload)}
+                elif path == "/api/agent/plans":
+                    result = {"plan": agent.create_plan(payload)}
+                elif path == "/api/agent/approve":
+                    result = {"plan": agent.approve(payload)}
+                elif path == "/api/agent/reject":
+                    result = {"plan": agent.reject(payload)}
+                elif path == "/api/agent/execute":
+                    result = {"plan": agent.execute(payload)}
+                elif path == "/api/pc-agent/suggestions":
+                    peer_auth.require(self.headers.get("Authorization"))
+                    suggestion = pc_agent.update(payload)
+                    audit.record(
+                        "pc_agent_suggestion_received",
+                        objective=suggestion["objective"],
+                    )
+                    result = {"suggestion": suggestion}
                 else:
                     hid.release_all()
                     result = {"hid": hid.status()}
+            except PeerAuthenticationError as exc:
+                self._send_json({"error": str(exc)}, HTTPStatus.UNAUTHORIZED)
+                return
+            except AgentConflictError as exc:
+                self._send_json({"error": str(exc)}, HTTPStatus.CONFLICT)
+                return
             except (
+                AgentControlError,
                 json.JSONDecodeError,
                 TypeError,
                 ValueError,
@@ -778,6 +931,28 @@ def create_handler(
                 self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(result)
+
+        def _send_snapshot(self) -> None:
+            snapshot = getattr(stream, "snapshot", None)
+            if not callable(snapshot):
+                self._send_json(
+                    {"error": "video source does not support snapshots"},
+                    HTTPStatus.NOT_IMPLEMENTED,
+                )
+                return
+            try:
+                jpeg, metadata = snapshot()
+            except (OSError, ValueError, RuntimeError) as exc:
+                self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(jpeg)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-SHA256", str(metadata["sha256"]))
+            self.end_headers()
+            self.wfile.write(jpeg)
 
         def _send_json(
             self,
@@ -847,6 +1022,14 @@ class KVMHTTPServer(ThreadingHTTPServer):
             hid_adapter, backend=hid_backend
         )
         self.host_info_store = HostInfoStore(config.host_info_path)
+        self.audit_log = AuditLog(config.audit_path)
+        self.peer_authenticator = PeerTokenAuthenticator(config.pc_agent_token_path)
+        self.pc_agent_store = PcAgentSuggestionStore(config.pc_agent_suggestion_path)
+        self.agent_coordinator = AgentCoordinator(
+            hid_controller=self.hid_controller,
+            observe=lambda: observe_stream(self.stream_controller, config),
+            audit_log=self.audit_log,
+        )
         super().__init__(
             server_address,
             create_handler(
@@ -855,6 +1038,10 @@ class KVMHTTPServer(ThreadingHTTPServer):
                 settings_updater=self.update_video_settings,
                 hid_controller=self.hid_controller,
                 host_info_store=self.host_info_store,
+                audit_log=self.audit_log,
+                peer_authenticator=self.peer_authenticator,
+                pc_agent_store=self.pc_agent_store,
+                agent_coordinator=self.agent_coordinator,
             ),
         )
 
@@ -927,6 +1114,24 @@ def _parser() -> argparse.ArgumentParser:
         help="validated controlled-host inventory cache",
     )
     parser.add_argument(
+        "--audit-file",
+        type=Path,
+        default=Path("data/audit.jsonl"),
+        help="append-only Agent audit log",
+    )
+    parser.add_argument(
+        "--pc-agent-token-file",
+        type=Path,
+        default=Path("data/pc-agent-token"),
+        help="bearer token used by the optional PC Agent",
+    )
+    parser.add_argument(
+        "--pc-agent-suggestion-file",
+        type=Path,
+        default=Path("data/pc-agent-suggestion.json"),
+        help="latest authenticated PC Agent recommendation",
+    )
+    parser.add_argument(
         "--enable-hid",
         action="store_true",
         help="explicitly enable Web keyboard output",
@@ -961,6 +1166,9 @@ def main(argv: list[str] | None = None) -> int:
         height=args.height,
         fps=args.fps,
         host_info_path=args.host_info_file,
+        audit_path=args.audit_file,
+        pc_agent_token_path=args.pc_agent_token_file,
+        pc_agent_suggestion_path=args.pc_agent_suggestion_file,
     )
     hid_adapter: HidAdapter | None = None
     hid_controller: HidWebController | None = None

@@ -315,6 +315,23 @@ body.agent-mode .agent-shell { transform: translateX(0); }
 .agent-message { display: flex; align-items: flex-start; max-width: 84%; margin-bottom: 22px; }
 .agent-message:last-child { margin-bottom: 0; }
 .agent-message p { margin: 0; color: #aab5c4; font-size: 13px; line-height: 1.65; }
+.agent-plan { display: grid; gap: 11px; min-width: min(520px, 72vw); margin-top: 10px; padding: 15px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: #111722; }
+.agent-plan-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.risk-badge { padding: 4px 8px; border-radius: 999px; color: #8de9bc; background: rgba(105,224,163,.12); font-size: 10px; font-weight: 700; }
+.risk-high .risk-badge, .risk-critical .risk-badge { color: #ffbc7d; background: rgba(255,153,69,.12); }
+.risk-critical .risk-badge { color: #ff9da4; background: rgba(255,107,120,.12); }
+.plan-status { color: #7f8a9a; font-size: 10px; }
+.agent-plan-actions { display: grid; gap: 6px; margin: 0; padding-left: 20px; color: #c5ced9; font-size: 12px; line-height: 1.5; }
+.agent-plan-details { display: grid; gap: 5px; margin: 0; padding: 9px 10px; background: rgba(255,255,255,.025); }
+.agent-plan-details div { display: grid; grid-template-columns: 62px 1fr; gap: 9px; }
+.agent-plan-details dt { color: #687487; font-size: 10px; }
+.agent-plan-details dd { margin: 0; color: #aeb8c7; font-size: 10px; overflow-wrap: anywhere; }
+.plan-digest { color: #727f91; font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.agent-plan-result { padding: 9px 10px; border-left: 2px solid var(--accent); color: #9eabbc; background: rgba(105,224,163,.055); font-size: 11px; }
+.agent-plan-controls { display: flex; justify-content: flex-end; gap: 8px; }
+.agent-plan-controls button { min-width: 72px; height: 34px; padding: 0 12px; border: 1px solid rgba(255,255,255,.13); border-radius: 6px; color: #b7c1cf; background: #171f2c; cursor: pointer; }
+.agent-plan-controls button.approve { border-color: rgba(105,224,163,.35); color: #07120d; background: var(--accent); }
+.agent-plan-controls button:disabled { opacity: .45; cursor: wait; }
 .assistant-message { max-width: 100%; }
 .user-message { margin-left: auto; justify-content: flex-end; }
 .user-message > div { padding: 11px 14px; border-radius: 15px 15px 4px 15px; background: rgba(105, 224, 163, .14); }

@@ -45,6 +45,7 @@ const agentModelNames = {
 };
 let agentSessions = [];
 let activeAgentSessionId = "";
+let selectedAgentModel = "qwen2.5-1.5b";
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
 
@@ -367,6 +368,7 @@ function setAgentModelMenu(open) {
 
 function selectAgentModel(modelId, persist = true) {
   const selected = modelId in agentModelNames ? modelId : "qwen2.5-1.5b";
+  selectedAgentModel = selected;
   elements.agentModelName.textContent = agentModelNames[selected];
   for (const option of elements.agentModelMenu.querySelectorAll("[data-model-option]")) {
     option.classList.toggle("selected", option.dataset.modelOption === selected);
@@ -426,8 +428,67 @@ function renderAgentMessage(message) {
   const paragraph = document.createElement("p");
   paragraph.textContent = String(message.content ?? "");
   content.append(paragraph);
+  if (message.plan) content.append(renderAgentPlan(message.plan));
   article.append(content);
   return article;
+}
+
+function renderAgentPlan(plan) {
+  const card = document.createElement("section");
+  card.className = `agent-plan risk-${plan.risk}`;
+  card.dataset.planId = plan.plan_id;
+  const header = document.createElement("div"); header.className = "agent-plan-header";
+  const risk = document.createElement("span"); risk.className = "risk-badge";
+  risk.textContent = ({ read_only: "只读", low: "低风险", high: "高风险", critical: "极高风险" })[plan.risk] ?? plan.risk;
+  const status = document.createElement("span"); status.className = "plan-status";
+  status.textContent = ({ ready: "可执行", pending_approval: "等待批准", approved: "已批准", executing: "执行中", completed: "已完成", rejected: "已拒绝", failed: "失败", expired: "已过期" })[plan.status] ?? plan.status;
+  header.append(risk, status); card.append(header);
+
+  const actions = document.createElement("ol"); actions.className = "agent-plan-actions";
+  for (const action of plan.actions ?? []) {
+    const item = document.createElement("li");
+    if (action.type === "observe") item.textContent = "截取一帧并识别画面状态";
+    else if (action.type === "key_tap") item.textContent = `按下并释放 ${action.key}`;
+    else if (action.type === "wait") item.textContent = `等待 ${action.seconds} 秒`;
+    else item.textContent = "释放全部 HID 输入";
+    actions.append(item);
+  }
+  card.append(actions);
+
+  if (plan.approval_required) {
+    const details = document.createElement("dl"); details.className = "agent-plan-details";
+    const rows = [
+      ["目标", plan.target],
+      ["预期", plan.expected_result],
+      ["异常处理", plan.recovery],
+      ["画面证据", plan.evidence?.frame?.sha256 ? String(plan.evidence.frame.sha256).slice(0, 12) : "未取得"],
+    ];
+    for (const [label, value] of rows) {
+      const row = document.createElement("div");
+      const term = document.createElement("dt"); term.textContent = label;
+      const detail = document.createElement("dd"); detail.textContent = value ?? "--";
+      row.append(term, detail); details.append(row);
+    }
+    card.append(details);
+  }
+
+  if (plan.result?.length) {
+    const result = document.createElement("div"); result.className = "agent-plan-result";
+    const observation = plan.result.flatMap((item) => [item.result, item.verification]).find((item) => item?.frame);
+    result.textContent = observation
+      ? `画面：${observation.recognition?.state ?? "unknown"} · 帧校验 ${String(observation.frame.sha256 ?? "").slice(0, 12)}`
+      : "动作已经执行并记录审计。";
+    card.append(result);
+  }
+  if (plan.status === "pending_approval") {
+    const digest = document.createElement("code"); digest.className = "plan-digest";
+    digest.textContent = `计划校验 ${String(plan.digest).slice(0, 12)}`; card.append(digest);
+    const controls = document.createElement("div"); controls.className = "agent-plan-controls";
+    const reject = document.createElement("button"); reject.type = "button"; reject.dataset.planAction = "reject"; reject.textContent = "拒绝";
+    const approve = document.createElement("button"); approve.type = "button"; approve.className = "approve"; approve.dataset.planAction = "approve"; approve.textContent = "批准并执行";
+    controls.append(reject, approve); card.append(controls);
+  }
+  return card;
 }
 
 function renderAgentConversation() {
@@ -487,7 +548,7 @@ function resizeAgentInput() {
   elements.agentInput.style.height = `${Math.min(130, elements.agentInput.scrollHeight)}px`;
 }
 
-function submitAgentPrompt(prompt) {
+async function submitAgentPrompt(prompt) {
   const value = String(prompt ?? "").trim();
   if (!value) return;
   const session = activeAgentSession();
@@ -499,6 +560,45 @@ function submitAgentPrompt(prompt) {
   renderAgentConversation();
   elements.agentInput.value = "";
   resizeAgentInput();
+  elements.agentSend.disabled = true;
+  try {
+    const response = await postJson("/api/agent/plans", { objective: value, model: selectedAgentModel });
+    const plan = response.plan;
+    const assistantMessage = { role: "assistant", content: plan.summary, plan, createdAt: Date.now() };
+    session.messages.push(assistantMessage);
+    session.updatedAt = Date.now();
+    if (!plan.approval_required) {
+      const executed = await postJson("/api/agent/execute", { plan_id: plan.plan_id });
+      assistantMessage.plan = executed.plan;
+    }
+  } catch (error) {
+    session.messages.push({ role: "assistant", content: `无法处理：${error.message}`, createdAt: Date.now() });
+  } finally {
+    session.updatedAt = Date.now(); saveAgentSessions(); renderAgentSessions(); renderAgentConversation();
+    elements.agentSend.disabled = false; elements.agentInput.focus({ preventScroll: true });
+  }
+}
+
+async function handleAgentPlanAction(button) {
+  const card = button.closest("[data-plan-id]");
+  const session = activeAgentSession();
+  const message = session.messages.find((item) => item.plan?.plan_id === card?.dataset.planId);
+  if (!message) return;
+  for (const control of card.querySelectorAll("button")) control.disabled = true;
+  try {
+    if (button.dataset.planAction === "reject") {
+      message.plan = (await postJson("/api/agent/reject", { plan_id: message.plan.plan_id })).plan;
+    } else {
+      message.plan = (await postJson("/api/agent/approve", {
+        plan_id: message.plan.plan_id,
+        digest: message.plan.digest,
+      })).plan;
+      message.plan = (await postJson("/api/agent/execute", { plan_id: message.plan.plan_id })).plan;
+    }
+  } catch (error) {
+    message.content = `${message.content}\n无法完成：${error.message}`;
+  }
+  session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation();
 }
 
 function setZoom(value) {
@@ -696,6 +796,10 @@ elements.agentInput.addEventListener("keydown", (event) => {
 elements.agentComposer.addEventListener("submit", (event) => {
   event.preventDefault();
   submitAgentPrompt(elements.agentInput.value);
+});
+elements.agentConversation.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-plan-action]");
+  if (button) handleAgentPlanAction(button);
 });
 elements.agentModelButton.addEventListener("click", () => setAgentModelMenu(elements.agentModelMenu.hidden));
 elements.agentModelMenu.addEventListener("click", (event) => {

@@ -6,7 +6,7 @@ Agent IP KVM 不能从 HDMI 视频或 USB HID 直接读取操作系统和硬件�
 
 1. 被控主机运行 `scripts/report-windows-host-info.ps1`。
 2. 脚本通过 Windows CIM 读取系统、整机、BIOS、CPU、GPU、内存、磁盘、卷和网络地址。
-3. 脚本将 JSON 发送至开发板的 `POST /api/host-info`。
+3. 脚本将 JSON 发送至开发板的 `POST /api/host-info`；安装服务启用配对后需携带 Bearer 令牌。
 4. 开发板验证数据结构后，原子写入 `data/controlled-host.json`。
 5. KVM 设置面板与未来的板载 Agent 读取同一份缓存。
 
