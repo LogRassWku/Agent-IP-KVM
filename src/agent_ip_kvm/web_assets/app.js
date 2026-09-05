@@ -30,6 +30,8 @@ let pendingWheel = 0;
 let relativeRequestActive = false;
 let relativeSyncActive = false;
 let relativeSynced = false;
+const HID_MOUSE_STEP = 100;
+const HID_MOUSE_STEP_DELAY_MS = 8;
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
 
@@ -188,6 +190,24 @@ async function postJson(path, payload) {
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
 }
 
+function pause(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function sendRelativeDistance(deltaX, deltaY, wheel = 0) {
+  let remainingX = Math.round(deltaX);
+  let remainingY = Math.round(deltaY);
+  while (remainingX || remainingY) {
+    const stepX = Math.max(-HID_MOUSE_STEP, Math.min(HID_MOUSE_STEP, remainingX));
+    const stepY = Math.max(-HID_MOUSE_STEP, Math.min(HID_MOUSE_STEP, remainingY));
+    await postJson("/api/hid/mouse-move", { delta_x: stepX, delta_y: stepY, wheel: 0 });
+    remainingX -= stepX;
+    remainingY -= stepY;
+    if (remainingX || remainingY) await pause(HID_MOUSE_STEP_DELAY_MS);
+  }
+  if (wheel) await postJson("/api/hid/mouse-move", { delta_x: 0, delta_y: 0, wheel });
+}
+
 function videoContentRect() {
   const shell = elements.videoShell.getBoundingClientRect();
   const aspect = videoWidth / videoHeight;
@@ -236,9 +256,9 @@ async function synchroniseRelativePointer() {
   pendingDeltaY = 0;
   elements.mouseMessage.textContent = "正在校准鼠标位置";
   try {
-    await postJson("/api/hid/mouse-move", { delta_x: -4096, delta_y: -4096, wheel: 0 });
+    await sendRelativeDistance(-4096, -4096);
     const pointer = latestVideoPointer;
-    await postJson("/api/hid/mouse-move", { delta_x: pointer.targetX, delta_y: pointer.targetY, wheel: 0 });
+    await sendRelativeDistance(pointer.targetX, pointer.targetY);
     lastVideoPointer = pointer;
     relativeSynced = true;
     elements.mouseMessage.textContent = "HID 已连接 · 鼠标已校准";
@@ -267,8 +287,8 @@ function queueRelativeMovement(pointer) {
 
 async function flushRelativeMovement() {
   if (relativeRequestActive || relativeSyncActive || !hidEnabled || !relativeSynced) return;
-  const deltaX = Math.max(-4096, Math.min(4096, Math.round(pendingDeltaX)));
-  const deltaY = Math.max(-4096, Math.min(4096, Math.round(pendingDeltaY)));
+  const deltaX = Math.max(-HID_MOUSE_STEP, Math.min(HID_MOUSE_STEP, Math.round(pendingDeltaX)));
+  const deltaY = Math.max(-HID_MOUSE_STEP, Math.min(HID_MOUSE_STEP, Math.round(pendingDeltaY)));
   const wheel = Math.max(-127, Math.min(127, Math.round(pendingWheel)));
   if (!deltaX && !deltaY && !wheel) return;
   pendingDeltaX -= deltaX;
