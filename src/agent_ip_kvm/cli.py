@@ -7,12 +7,19 @@ import json
 import sys
 import time
 
-from .video import SyntheticVideoSource, VideoSourceError, discover_v4l2_devices
+from .video import (
+    FFmpegFileVideoSource,
+    SyntheticVideoSource,
+    VideoSource,
+    VideoSourceError,
+    discover_v4l2_devices,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-ip-kvm-video")
-    parser.add_argument("--source", choices=("synthetic",), default="synthetic")
+    parser.add_argument("--source", choices=("synthetic", "file"), default="synthetic")
+    parser.add_argument("--file", help="local video path when --source=file")
     parser.add_argument("--frames", type=int, default=30)
     parser.add_argument(
         "--discover-v4l2",
@@ -53,11 +60,10 @@ def discover() -> dict[str, object]:
     }
 
 
-def run(frames: int) -> dict[str, object]:
+def run(source: VideoSource, frames: int) -> dict[str, object]:
     if frames < 1:
         raise ValueError("frames must be at least 1")
 
-    source = SyntheticVideoSource(realtime=True)
     mode = source.open()
     source.start()
     started_ns = time.monotonic_ns()
@@ -98,7 +104,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(discover(), ensure_ascii=False, indent=2))
         return 0
     try:
-        result = run(args.frames)
+        if args.source == "file":
+            if not args.file:
+                raise ValueError("--file is required when --source=file")
+            source: VideoSource = FFmpegFileVideoSource(args.file, realtime=True)
+        else:
+            source = SyntheticVideoSource(realtime=True)
+        result = run(source, args.frames)
     except (ValueError, VideoSourceError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False))
         return 1

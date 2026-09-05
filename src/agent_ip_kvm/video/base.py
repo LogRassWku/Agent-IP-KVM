@@ -11,11 +11,16 @@ class SourceHealth(str, Enum):
     CLOSED = "closed"
     READY = "ready"
     STREAMING = "streaming"
+    ENDED = "ended"
     ERROR = "error"
 
 
 class VideoSourceError(RuntimeError):
     """A video source could not complete the requested operation."""
+
+
+class EndOfStream(VideoSourceError):
+    """A finite video source reached its natural end."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,4 +97,3 @@ class VideoSource(ABC):
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.close()
-

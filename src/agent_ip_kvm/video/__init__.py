@@ -1,6 +1,14 @@
 """Video source abstractions and built-in adapters."""
 
-from .base import Frame, SourceCapability, SourceHealth, VideoSource, VideoSourceError
+from .base import (
+    EndOfStream,
+    Frame,
+    SourceCapability,
+    SourceHealth,
+    VideoSource,
+    VideoSourceError,
+)
+from .file import FFmpegFileVideoSource
 from .synthetic import SyntheticVideoSource
 from .v4l2 import (
     DiscoveryStatus,
@@ -11,8 +19,10 @@ from .v4l2 import (
 )
 
 __all__ = [
-    "Frame",
     "DiscoveryStatus",
+    "EndOfStream",
+    "FFmpegFileVideoSource",
+    "Frame",
     "SourceCapability",
     "SourceHealth",
     "SyntheticVideoSource",

@@ -32,6 +32,17 @@ python -m agent_ip_kvm.cli --frames 30
 
 命令会读取 30 帧模拟画面，并以 JSON 输出分辨率、格式、帧序号、字节数、实测帧率和最终状态。它不会保存截图。
 
+也可以通过 FFmpeg 读取本地视频文件：
+
+```bash
+PYTHONPATH=src python -m agent_ip_kvm.cli \
+  --source file \
+  --file /path/to/test-video.mp4 \
+  --frames 30
+```
+
+文件源只接受本地存在的文件。它通过 `ffprobe` 读取第一条视频轨的分辨率和帧率，再通过 `ffmpeg` 输出统一的 RGB24 帧；文件自然结束时返回明确的 `end of stream` 状态。
+
 ## 探测 Linux 视频设备
 
 RDK X5 和其他 Linux 开发板需要安装 `v4l2-ctl`。只查询设备和格式，不读取或保存画面：
