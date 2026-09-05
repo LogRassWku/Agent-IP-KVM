@@ -22,9 +22,14 @@ let zoomPercent = 100;
 const activeModifiers = new Set();
 let videoWidth = 16;
 let videoHeight = 9;
-let pendingPointer = null;
+let lastVideoPointer = null;
+let latestVideoPointer = null;
+let pendingDeltaX = 0;
+let pendingDeltaY = 0;
 let pendingWheel = 0;
-let pointerRequestActive = false;
+let relativeRequestActive = false;
+let relativeSyncActive = false;
+let relativeSynced = false;
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
 
@@ -95,13 +100,17 @@ function updateHidStatus(hid) {
   const statusText = hidEnabled ? (hid.backend === "simulated" ? "HID 模拟模式" : "HID 已连接")
     : (disconnected ? "HID 未连接" : "HID 尚未启用");
   elements.hidMessage.textContent = statusText;
-  elements.mouseMessage.textContent = hidEnabled ? "HID 已连接 · 鼠标位置自动同步" : statusText;
+  elements.mouseMessage.textContent = hidEnabled ? "HID 已连接 · 移入画面后自动校准鼠标" : statusText;
   elements.releaseKeys.disabled = !hidEnabled;
   for (const key of elements.keyboardRows.querySelectorAll("button")) key.disabled = !hidEnabled;
   if (!hidEnabled) {
     clearModifiers();
-    pendingPointer = null;
+    lastVideoPointer = null;
+    latestVideoPointer = null;
+    pendingDeltaX = 0;
+    pendingDeltaY = 0;
     pendingWheel = 0;
+    relativeSynced = false;
   }
 }
 
@@ -200,7 +209,7 @@ function videoContentRect() {
   };
 }
 
-function pointerFromEvent(event) {
+function videoPointerFromEvent(event) {
   if (event.target.closest?.(".zoom-buttons")) return null;
   const rect = videoContentRect();
   const insideShell = event.clientX >= rect.shell.left && event.clientX <= rect.shell.right
@@ -208,35 +217,80 @@ function pointerFromEvent(event) {
   const insideVideo = event.clientX >= rect.left && event.clientX <= rect.left + rect.width
     && event.clientY >= rect.top && event.clientY <= rect.top + rect.height;
   if (!insideShell || !insideVideo) return null;
+  const normalisedX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const normalisedY = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
   return {
-    x: Math.round(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * 32767),
-    y: Math.round(Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) * 32767),
+    clientX: event.clientX,
+    clientY: event.clientY,
+    width: rect.width,
+    height: rect.height,
+    targetX: Math.round(normalisedX * Math.max(0, videoWidth - 1)),
+    targetY: Math.round(normalisedY * Math.max(0, videoHeight - 1)),
   };
 }
 
-async function flushPointerPosition() {
-  if (pointerRequestActive || !hidEnabled || pendingPointer === null) return;
-  const pointer = pendingPointer;
-  const wheel = Math.max(-127, Math.min(127, Math.round(pendingWheel)));
-  pendingPointer = null;
-  pendingWheel -= wheel;
-  pointerRequestActive = true;
+async function synchroniseRelativePointer() {
+  if (relativeSyncActive || !hidEnabled || latestVideoPointer === null) return;
+  relativeSyncActive = true;
+  pendingDeltaX = 0;
+  pendingDeltaY = 0;
+  elements.mouseMessage.textContent = "正在校准鼠标位置";
   try {
-    await postJson("/api/hid/mouse-position", { x: pointer.x, y: pointer.y, wheel });
+    await postJson("/api/hid/mouse-move", { delta_x: -4096, delta_y: -4096, wheel: 0 });
+    const pointer = latestVideoPointer;
+    await postJson("/api/hid/mouse-move", { delta_x: pointer.targetX, delta_y: pointer.targetY, wheel: 0 });
+    lastVideoPointer = pointer;
+    relativeSynced = true;
+    elements.mouseMessage.textContent = "HID 已连接 · 鼠标已校准";
   } catch (error) {
     elements.mouseMessage.textContent = error.message;
     await refreshStatus();
   } finally {
-    pointerRequestActive = false;
-    if (pendingPointer !== null) requestAnimationFrame(flushPointerPosition);
+    relativeSyncActive = false;
+    if (relativeSynced && (pendingDeltaX || pendingDeltaY || pendingWheel)) requestAnimationFrame(flushRelativeMovement);
   }
 }
 
-async function clickMouse(buttonNumber, pointer) {
+function queueRelativeMovement(pointer) {
+  latestVideoPointer = pointer;
+  if (!relativeSynced) {
+    synchroniseRelativePointer();
+    return;
+  }
+  if (lastVideoPointer !== null) {
+    pendingDeltaX += (pointer.clientX - lastVideoPointer.clientX) * videoWidth / pointer.width;
+    pendingDeltaY += (pointer.clientY - lastVideoPointer.clientY) * videoHeight / pointer.height;
+  }
+  lastVideoPointer = pointer;
+  requestAnimationFrame(flushRelativeMovement);
+}
+
+async function flushRelativeMovement() {
+  if (relativeRequestActive || relativeSyncActive || !hidEnabled || !relativeSynced) return;
+  const deltaX = Math.max(-4096, Math.min(4096, Math.round(pendingDeltaX)));
+  const deltaY = Math.max(-4096, Math.min(4096, Math.round(pendingDeltaY)));
+  const wheel = Math.max(-127, Math.min(127, Math.round(pendingWheel)));
+  if (!deltaX && !deltaY && !wheel) return;
+  pendingDeltaX -= deltaX;
+  pendingDeltaY -= deltaY;
+  pendingWheel -= wheel;
+  relativeRequestActive = true;
+  try {
+    await postJson("/api/hid/mouse-move", { delta_x: deltaX, delta_y: deltaY, wheel });
+  } catch (error) {
+    elements.mouseMessage.textContent = error.message;
+    await refreshStatus();
+  } finally {
+    relativeRequestActive = false;
+    if (pendingDeltaX || pendingDeltaY || pendingWheel) requestAnimationFrame(flushRelativeMovement);
+  }
+}
+
+async function clickMouse(buttonNumber) {
   const names = { 0: "left", 1: "middle", 2: "right" };
   const button = names[buttonNumber];
   if (!button || !hidEnabled) return;
-  try { await postJson("/api/hid/mouse-click", { button, x: pointer.x, y: pointer.y }); }
+  try { await postJson("/api/hid/mouse-click", { button }); }
   catch (error) { elements.mouseMessage.textContent = error.message; await refreshStatus(); }
 }
 async function tapKey(button) {
@@ -263,31 +317,40 @@ elements.zoomOut.addEventListener("click", () => setZoom(zoomPercent - 10));
 elements.zoomIn.addEventListener("click", () => setZoom(zoomPercent + 10));
 elements.cursorSizeSelect.addEventListener("change", () => setCursorSize(elements.cursorSizeSelect.value));
 document.addEventListener("mousemove", (event) => {
-  if (!hidEnabled || !elements.videoShell.contains(event.target)) return;
-  const pointer = pointerFromEvent(event);
-  if (pointer === null) return;
-  pendingPointer = pointer;
-  requestAnimationFrame(flushPointerPosition);
+  if (!hidEnabled) return;
+  const pointer = elements.videoShell.contains(event.target) ? videoPointerFromEvent(event) : null;
+  if (pointer === null) {
+    lastVideoPointer = null;
+    latestVideoPointer = null;
+    relativeSynced = false;
+    return;
+  }
+  queueRelativeMovement(pointer);
 });
 document.addEventListener("mousedown", (event) => {
   if (!hidEnabled || !elements.videoShell.contains(event.target)) return;
-  const pointer = pointerFromEvent(event);
+  const pointer = videoPointerFromEvent(event);
   if (pointer === null) return;
   event.preventDefault();
-  pendingPointer = pointer;
-  clickMouse(event.button, pointer);
+  latestVideoPointer = pointer;
+  if (!relativeSynced) {
+    synchroniseRelativePointer();
+    return;
+  }
+  clickMouse(event.button);
 });
 document.addEventListener("wheel", (event) => {
   if (!hidEnabled || !elements.videoShell.contains(event.target)) return;
-  const pointer = pointerFromEvent(event);
+  const pointer = videoPointerFromEvent(event);
   if (pointer === null) return;
   event.preventDefault();
-  pendingPointer = pointer;
+  latestVideoPointer = pointer;
   pendingWheel += Math.sign(-event.deltaY);
-  requestAnimationFrame(flushPointerPosition);
+  if (!relativeSynced) synchroniseRelativePointer();
+  else requestAnimationFrame(flushRelativeMovement);
 }, { passive: false });
 elements.videoShell.addEventListener("contextmenu", (event) => {
-  if (hidEnabled && pointerFromEvent(event) !== null) event.preventDefault();
+  if (hidEnabled && videoPointerFromEvent(event) !== null) event.preventDefault();
 });
 elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {

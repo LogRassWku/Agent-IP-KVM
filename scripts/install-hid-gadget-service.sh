@@ -51,13 +51,14 @@ chmod 0644 "$INSTALL_DIR"/*-report-desc.bin
 
 cat > "$UNIT_PATH" <<'UNIT'
 [Unit]
-Description=Add Agent IP KVM keyboard and pointer devices to the existing USB Gadget
+Description=Add Agent IP KVM keyboard and mouse devices to the existing USB Gadget
 After=hobot-usb-gadget.service
 Wants=hobot-usb-gadget.service
 
 [Service]
 Type=oneshot
-Environment=AGENT_IP_KVM_INCLUDE_RELATIVE_MOUSE=0
+Environment=AGENT_IP_KVM_INCLUDE_RELATIVE_MOUSE=1
+Environment=AGENT_IP_KVM_INCLUDE_ABSOLUTE_POINTER=0
 ExecStart=/usr/local/lib/agent-ip-kvm/apply-hid-gadget.sh --apply
 RemainAfterExit=yes
 

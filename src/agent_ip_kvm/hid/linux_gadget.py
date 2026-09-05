@@ -353,10 +353,10 @@ class LinuxGadgetHidAdapter(HidAdapter):
         if self._button_mask & bit:
             return
         self._button_mask |= bit
-        if self._pointer_writer is not None:
-            self._write_pointer()
-        else:
+        if self._mouse_writer is not None:
             self._write_mouse()
+        else:
+            self._write_pointer()
 
     def button_up(self, button: MouseButton) -> None:
         self._require_ready()
@@ -366,10 +366,10 @@ class LinuxGadgetHidAdapter(HidAdapter):
         if not self._button_mask & bit:
             return
         self._button_mask &= ~bit
-        if self._pointer_writer is not None:
-            self._write_pointer()
-        else:
+        if self._mouse_writer is not None:
             self._write_mouse()
+        else:
+            self._write_pointer()
 
     def release_all(self) -> None:
         self._modifier_mask = 0
@@ -386,7 +386,7 @@ class LinuxGadgetHidAdapter(HidAdapter):
                 self._write_one(self._mouse_writer, bytes(4), "mouse")
             except HidError as exc:
                 errors.append(exc)
-        if self._pointer_writer is not None:
+        if self._pointer_writer is not None and self._mouse_writer is None:
             try:
                 self._write_pointer()
             except HidError as exc:

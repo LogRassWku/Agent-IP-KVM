@@ -207,6 +207,20 @@ class WebInterfaceTests(unittest.TestCase):
         self.assertEqual(controller.status()["state"], "disconnected")
         self.assertFalse(controller.status()["enabled"])
 
+    def test_auto_hid_controller_supports_relative_mouse_without_absolute_pointer(self) -> None:
+        current = {"devices": ("keyboard", "mouse", None)}
+
+        def factory(keyboard, mouse, pointer):
+            self.assertEqual((keyboard, mouse, pointer), ("keyboard", "mouse", None))
+            return SimulatedHidAdapter()
+
+        controller = AutoLinuxHidController(lambda: current["devices"], factory)
+        self.assertTrue(controller.status()["enabled"])
+        self.assertEqual(
+            controller.move_mouse({"delta_x": 4, "delta_y": -3, "wheel": 0}),
+            {"delta_x": 4, "delta_y": -3, "wheel": 0},
+        )
+
     def test_web_hid_key_endpoint_uses_explicit_adapter(self) -> None:
         self.server.shutdown()
         self.server.server_close()

@@ -285,8 +285,8 @@ class HidWebController:
             raise HidError(f"HID is not ready: {adapter.state.value}")
 
 
-HidDeviceResolver = Callable[[], tuple[Path, Path | None, Path] | None]
-HidAdapterFactory = Callable[[Path, Path | None, Path], HidAdapter]
+HidDeviceResolver = Callable[[], tuple[Path, Path | None, Path | None] | None]
+HidAdapterFactory = Callable[[Path, Path | None, Path | None], HidAdapter]
 
 
 def _linux_hid_device_resolver(
@@ -296,7 +296,7 @@ def _linux_hid_device_resolver(
     mouse_function: str = "hid.mouse",
     pointer_function: str = "hid.pointer",
 ) -> HidDeviceResolver:
-    def resolve() -> tuple[Path, Path | None, Path] | None:
+    def resolve() -> tuple[Path, Path | None, Path | None] | None:
         try:
             udc_name = (gadget_root / "UDC").read_text(encoding="ascii").strip()
             if not udc_name:
@@ -308,15 +308,25 @@ def _linux_hid_device_resolver(
                 return None
             functions = gadget_root / "functions"
             keyboard_path = resolve_hidg_path(functions / keyboard_function, dev_root)
-            pointer_path = resolve_hidg_path(functions / pointer_function, dev_root)
             mouse_path: Path | None = None
             if any(
                 link.is_symlink()
                 for link in (gadget_root / "configs").glob(f"*/{mouse_function}")
             ):
                 mouse_path = resolve_hidg_path(functions / mouse_function, dev_root)
-            required = (keyboard_path, pointer_path)
-            if not all(os.access(path, os.W_OK) for path in required):
+            pointer_path: Path | None = None
+            if any(
+                link.is_symlink()
+                for link in (gadget_root / "configs").glob(f"*/{pointer_function}")
+            ):
+                pointer_path = resolve_hidg_path(functions / pointer_function, dev_root)
+            if not os.access(keyboard_path, os.W_OK):
+                return None
+            if mouse_path is not None and not os.access(mouse_path, os.W_OK):
+                return None
+            if pointer_path is not None and not os.access(pointer_path, os.W_OK):
+                return None
+            if mouse_path is None and pointer_path is None:
                 return None
             return keyboard_path, mouse_path, pointer_path
         except (OSError, HidError):
