@@ -84,7 +84,8 @@ apply_hid() {
        [ -L "$CONFIG/$POINTER_FUNCTION" ] && \
        [ ! -L "$CONFIG/$MOUSE_FUNCTION" ] && \
        [ "$(cat "$GADGET/functions/$KEYBOARD_FUNCTION/no_out_endpoint" 2>/dev/null || echo 0)" = 1 ] && \
-       [ "$(cat "$GADGET/functions/$POINTER_FUNCTION/no_out_endpoint" 2>/dev/null || echo 0)" = 1 ]; then
+       [ "$(cat "$GADGET/functions/$POINTER_FUNCTION/no_out_endpoint" 2>/dev/null || echo 0)" = 1 ] && \
+       cmp -s "$SCRIPT_DIR/pointer-report-desc.bin" "$GADGET/functions/$POINTER_FUNCTION/report_desc"; then
         echo "Agent IP KVM keyboard and absolute pointer are already active."
         return
     fi
@@ -92,6 +93,7 @@ apply_hid() {
     CREATE_KEYBOARD=1
     CREATE_MOUSE=1
     CREATE_POINTER=1
+    RECREATE_POINTER=0
     REMOVE_MOUSE_LINK=0
     if [ -e "$GADGET/functions/$KEYBOARD_FUNCTION" ] || [ -e "$CONFIG/$KEYBOARD_FUNCTION" ]; then
         [ -d "$GADGET/functions/$KEYBOARD_FUNCTION" ] && [ -L "$CONFIG/$KEYBOARD_FUNCTION" ] || fail "$KEYBOARD_FUNCTION is partial"
@@ -107,6 +109,7 @@ apply_hid() {
     if [ -e "$GADGET/functions/$POINTER_FUNCTION" ] || [ -e "$CONFIG/$POINTER_FUNCTION" ]; then
         [ -d "$GADGET/functions/$POINTER_FUNCTION" ] && [ -L "$CONFIG/$POINTER_FUNCTION" ] || fail "$POINTER_FUNCTION is partial"
         CREATE_POINTER=0
+        RECREATE_POINTER=1
     fi
     if [ "$INCLUDE_RELATIVE_MOUSE" -eq 0 ] && [ -L "$CONFIG/$MOUSE_FUNCTION" ]; then
         REMOVE_MOUSE_LINK=1
@@ -141,6 +144,15 @@ apply_hid() {
             (cd "$GADGET" && ln -s "functions/$KEYBOARD_FUNCTION" "configs/$CONFIGURATION") || true
         fi
         if [ "$CREATE_POINTER" -eq 0 ] && [ ! -L "$CONFIG/$POINTER_FUNCTION" ]; then
+            if [ ! -d "$GADGET/functions/$POINTER_FUNCTION" ]; then
+                mkdir "$GADGET/functions/$POINTER_FUNCTION"
+                printf '0' > "$GADGET/functions/$POINTER_FUNCTION/protocol"
+                printf '0' > "$GADGET/functions/$POINTER_FUNCTION/subclass"
+                printf '6' > "$GADGET/functions/$POINTER_FUNCTION/report_length"
+                cat "$SCRIPT_DIR/pointer-report-desc.bin" > "$GADGET/functions/$POINTER_FUNCTION/report_desc"
+                [ ! -e "$GADGET/functions/$POINTER_FUNCTION/no_out_endpoint" ] || \
+                    printf '1' > "$GADGET/functions/$POINTER_FUNCTION/no_out_endpoint"
+            fi
             (cd "$GADGET" && ln -s "functions/$POINTER_FUNCTION" "configs/$CONFIGURATION") || true
         fi
         restore_os_descriptor
@@ -154,6 +166,9 @@ apply_hid() {
         rm "$OS_DESC_LINK"
     fi
     rm -f "$CONFIG/$KEYBOARD_FUNCTION" "$CONFIG/$MOUSE_FUNCTION" "$CONFIG/$POINTER_FUNCTION"
+    if [ "$RECREATE_POINTER" -eq 1 ]; then
+        rmdir "$GADGET/functions/$POINTER_FUNCTION"
+    fi
 
     if [ "$CREATE_KEYBOARD" -eq 1 ]; then
         mkdir "$GADGET/functions/$KEYBOARD_FUNCTION"
@@ -176,7 +191,7 @@ apply_hid() {
         printf '1' > "$GADGET/functions/$MOUSE_FUNCTION/no_out_endpoint"
     fi
 
-    if [ "$CREATE_POINTER" -eq 1 ]; then
+    if [ "$CREATE_POINTER" -eq 1 ] || [ "$RECREATE_POINTER" -eq 1 ]; then
         mkdir "$GADGET/functions/$POINTER_FUNCTION"
     fi
     printf '0' > "$GADGET/functions/$POINTER_FUNCTION/protocol"
