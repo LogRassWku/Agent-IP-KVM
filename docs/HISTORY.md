@@ -160,6 +160,15 @@
 - 当前性能只作为 RGB24 软件转码基线。后续正常 UVC 设备若输出 MJPEG，应增加压缩帧直通路径，避免无意义的解码和重新编码。
 - 自动测试增加到十四项；RDK X5 部署前的十三项测试和电脑端最终十四项测试全部通过。新增测试验证 MJPEG 响应边界、JPEG 内容、帧序号和视频结束状态。
 
+## 2026-09-05：RDK X5 USB HID 能力只读探测完成
+
+- 加入平台无关的只读 USB Gadget HID 探测工具，报告 UDC、ConfigFS、内核 HID 支持、现有 Gadget 功能和管理链路风险；工具不会修改 ConfigFS 或发送输入事件。
+- RDK X5 实测暴露 `35300000.usb`，状态为 `configured`，当前和最高速度均为 USB High-Speed；ConfigFS 已挂载，内核启用 `CONFIG_USB_GADGET=y`、`CONFIG_USB_CONFIGFS=m` 和 `CONFIG_USB_CONFIGFS_F_HID=y`。
+- 当前系统 Gadget `g_comp` 已绑定 `RNDIS`、`ECM` 和只读 Mass Storage，USB QuickLink 管理地址位于 `usb0`。探测工具因此返回 `in_use` 和 `safe_to_modify_now: false`。
+- 厂商脚本已经包含 `rndis-hid` 配置和 HID FunctionFS 创建逻辑，说明平台能够建立 HID Gadget；但随系统提供的 34 字节报告描述符定义的是厂商私有用途页面，报告长度为 1024 字节，不是标准键盘或鼠标。
+- 第一版真实 HID 需要使用项目自有的标准键盘和鼠标描述符，并将其加入保留管理网络的复合 Gadget。任何重绑都会导致 USB 重新枚举，实施前必须准备本地备用访问和恢复脚本。
+- 三项 HID 探测测试加入后，项目自动测试总数为十七项；RDK X5 实机探测与电脑端完整测试均通过。
+
 ## 下一条记录
 
 发生以下任一事件时追加记录：
