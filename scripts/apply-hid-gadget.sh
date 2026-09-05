@@ -178,11 +178,11 @@ apply_hid() {
 
     if [ "$CREATE_POINTER" -eq 1 ]; then
         mkdir "$GADGET/functions/$POINTER_FUNCTION"
-        printf '0' > "$GADGET/functions/$POINTER_FUNCTION/protocol"
-        printf '0' > "$GADGET/functions/$POINTER_FUNCTION/subclass"
-        printf '6' > "$GADGET/functions/$POINTER_FUNCTION/report_length"
-        cat "$SCRIPT_DIR/pointer-report-desc.bin" > "$GADGET/functions/$POINTER_FUNCTION/report_desc"
     fi
+    printf '0' > "$GADGET/functions/$POINTER_FUNCTION/protocol"
+    printf '0' > "$GADGET/functions/$POINTER_FUNCTION/subclass"
+    printf '6' > "$GADGET/functions/$POINTER_FUNCTION/report_length"
+    cat "$SCRIPT_DIR/pointer-report-desc.bin" > "$GADGET/functions/$POINTER_FUNCTION/report_desc"
     [ ! -e "$GADGET/functions/$POINTER_FUNCTION/no_out_endpoint" ] || \
         printf '1' > "$GADGET/functions/$POINTER_FUNCTION/no_out_endpoint"
 

@@ -73,7 +73,7 @@ RELATIVE_MOUSE_REPORT_DESCRIPTOR = bytes.fromhex(
 )
 
 
-# Six-byte absolute pointer report: five buttons, 16-bit X/Y, and vertical wheel.
+# Six-byte absolute pointer report: eight buttons, 16-bit X/Y, and vertical wheel.
 # X/Y use the full 0..32767 logical desktop range so a browser coordinate can be
 # mapped directly without relying on host pointer acceleration.
 ABSOLUTE_POINTER_REPORT_DESCRIPTOR = bytes.fromhex(
@@ -84,15 +84,12 @@ ABSOLUTE_POINTER_REPORT_DESCRIPTOR = bytes.fromhex(
     "a1 00"  # Collection (Physical)
     "05 09"  # Usage Page (Buttons)
     "19 01"  # Usage Minimum (Button 1)
-    "29 05"  # Usage Maximum (Button 5)
+    "29 08"  # Usage Maximum (Button 8)
     "15 00"  # Logical Minimum (0)
     "25 01"  # Logical Maximum (1)
-    "95 05"  # Report Count (5)
+    "95 08"  # Report Count (8)
     "75 01"  # Report Size (1)
     "81 02"  # Input (Data, Variable, Absolute)
-    "95 01"  # Report Count (1)
-    "75 03"  # Report Size (3)
-    "81 01"  # Input (Constant)
     "05 01"  # Usage Page (Generic Desktop)
     "09 30"  # Usage (X)
     "09 31"  # Usage (Y)

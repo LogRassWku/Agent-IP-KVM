@@ -22,7 +22,7 @@ class HidDescriptorTests(unittest.TestCase):
         self.assertEqual(POINTER_FUNCTION.report_length, 6)
         self.assertEqual(len(BOOT_KEYBOARD_REPORT_DESCRIPTOR), 63)
         self.assertEqual(len(RELATIVE_MOUSE_REPORT_DESCRIPTOR), 52)
-        self.assertEqual(len(ABSOLUTE_POINTER_REPORT_DESCRIPTOR), 64)
+        self.assertEqual(len(ABSOLUTE_POINTER_REPORT_DESCRIPTOR), 58)
         self.assertEqual(BOOT_KEYBOARD_REPORT_DESCRIPTOR[-1], 0xC0)
         self.assertEqual(RELATIVE_MOUSE_REPORT_DESCRIPTOR[-2:], b"\xc0\xc0")
 
