@@ -14,6 +14,7 @@ license = { text = "Apache-2.0" }
 agent-ip-kvm-video = "agent_ip_kvm.cli:main"
 agent-ip-kvm-web = "agent_ip_kvm.web:main"
 agent-ip-kvm-hid-probe = "agent_ip_kvm.hid_cli:main"
+agent-ip-kvm-hid-output = "agent_ip_kvm.hid_output_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
