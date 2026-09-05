@@ -18,6 +18,7 @@ from typing import Callable, Iterator, Protocol
 from urllib.parse import urlsplit
 
 from . import __version__
+from .host_info import HostInfoStore
 from .hid import (
     HidAdapter,
     HidError,
@@ -47,6 +48,7 @@ class WebConfig:
     width: int = 1920
     height: int = 1080
     fps: float = 30.0
+    host_info_path: Path = Path("data/controlled-host.json")
 
 
 def _make_source(config: WebConfig) -> VideoSource:
@@ -661,9 +663,11 @@ def create_handler(
     stream_provider: StreamProvider | None = None,
     settings_updater: SettingsUpdater | None = None,
     hid_controller: HidWebController | None = None,
+    host_info_store: HostInfoStore | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     stream = stream_provider or VideoStreamController(config)
     hid = hid_controller or HidWebController()
+    host_info = host_info_store or HostInfoStore(config.host_info_path)
     assets = {
         "/": ("index.html", "text/html; charset=utf-8"),
         "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -681,6 +685,7 @@ def create_handler(
                 payload = status_provider(config)
                 payload["stream"] = stream.status()
                 payload["hid"] = hid.status()
+                payload["controlled_host"] = host_info.status()
                 self._send_json(payload)
                 return
             if path == "/api/stream.mjpg":
@@ -698,6 +703,7 @@ def create_handler(
             if path not in {
                 "/api/video-settings",
                 "/api/video/pause",
+                "/api/host-info",
                 "/api/hid/key",
                 "/api/hid/mouse-move",
                 "/api/hid/mouse-position",
@@ -727,7 +733,8 @@ def create_handler(
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = 0
-            if length < 0 or length > 4096 or (
+            maximum_length = 65536 if path == "/api/host-info" else 4096
+            if length < 0 or length > maximum_length or (
                 length == 0 and path not in {"/api/hid/release", "/api/video/pause"}
             ):
                 self._send_json({"error": "invalid request body"}, HTTPStatus.BAD_REQUEST)
@@ -741,6 +748,8 @@ def create_handler(
                         self.send_error(HTTPStatus.NOT_FOUND)
                         return
                     result = {"video": settings_updater(payload)}
+                elif path == "/api/host-info":
+                    result = {"controlled_host": host_info.update(payload)}
                 elif path == "/api/video/pause":
                     pause = getattr(stream, "pause", None)
                     if not callable(pause):
@@ -758,7 +767,14 @@ def create_handler(
                 else:
                     hid.release_all()
                     result = {"hid": hid.status()}
-            except (json.JSONDecodeError, TypeError, ValueError, VideoSourceError, HidError) as exc:
+            except (
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+                OSError,
+                VideoSourceError,
+                HidError,
+            ) as exc:
                 self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(result)
@@ -830,6 +846,7 @@ class KVMHTTPServer(ThreadingHTTPServer):
         self.hid_controller = hid_controller or HidWebController(
             hid_adapter, backend=hid_backend
         )
+        self.host_info_store = HostInfoStore(config.host_info_path)
         super().__init__(
             server_address,
             create_handler(
@@ -837,6 +854,7 @@ class KVMHTTPServer(ThreadingHTTPServer):
                 stream_provider=self.stream_controller,
                 settings_updater=self.update_video_settings,
                 hid_controller=self.hid_controller,
+                host_info_store=self.host_info_store,
             ),
         )
 
@@ -903,6 +921,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument(
+        "--host-info-file",
+        type=Path,
+        default=Path("data/controlled-host.json"),
+        help="validated controlled-host inventory cache",
+    )
+    parser.add_argument(
         "--enable-hid",
         action="store_true",
         help="explicitly enable Web keyboard output",
@@ -936,6 +960,7 @@ def main(argv: list[str] | None = None) -> int:
         width=args.width,
         height=args.height,
         fps=args.fps,
+        host_info_path=args.host_info_file,
     )
     hid_adapter: HidAdapter | None = None
     hid_controller: HidWebController | None = None

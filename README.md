@@ -147,7 +147,7 @@ sudo sh scripts/install-uvc-power-rule.sh 2b89 5854
 sudo sh scripts/install-uvc-power-rule.sh --remove
 ```
 
-顶部栏显示刷新、鼠标、键盘、屏幕和设置按钮，不显示项目标题或品牌图标。视频区域左下角的两个按钮可把浏览器画面缩放到 50% 至 200%；屏幕菜单只选择采集设备实际支持的 MJPEG 分辨率和刷新率。缩放画面不会移动顶部工具栏或左下角按钮。鼠标菜单可以调整画面内的光标大小。网页打开且 HID 可用时，鼠标一进入实际视频画面就会自动把位置换算为绝对坐标，并同步位置、点击和滚轮，不需要点击开始按钮。键盘按钮会打开触屏屏幕键盘。
+顶部栏显示刷新、键盘、屏幕和设置按钮，不显示项目标题或品牌图标。视频区域左下角的两个按钮可把浏览器画面缩放到 50% 至 200%；屏幕菜单只选择采集设备实际支持的 MJPEG 分辨率和刷新率。缩放画面不会移动顶部工具栏或左下角按钮。网页打开且 HID 可用时，鼠标一进入实际视频画面就会自动把位置换算为绝对坐标，并同步位置、点击和滚轮，不需要点击开始按钮；视频区域隐藏浏览器本机光标，只保留回传画面中的被控端光标。键盘按钮会打开触屏屏幕键盘，修饰键可直接发送或通过粘滞模式组成组合键。
 
 Linux 上默认使用 `auto` 后端：USB 主机已配置 Gadget 且键盘、绝对指针端点均可写时，页面自动启用 HID；相对鼠标端点允许缺省。断开时会释放输入并恢复为未连接。为 Web 服务账号安装端点权限规则：
 
@@ -177,6 +177,16 @@ sudo sh scripts/install-web-service.sh sunrise /home/sunrise/agent-ip-kvm-app
 ```
 
 服务监听 `0.0.0.0:8765`，使用 `/dev/video0` 的 1920×1080、30 fps MJPEG，并在异常退出后自动重启。使用 `sudo sh scripts/install-web-service.sh --remove` 可以撤销。RDK X5 已完成实际重启验证，Web 与 HID Gadget 服务均会自动恢复。
+
+## 读取被控主机信息
+
+HDMI 和 HID 不提供操作系统硬件清单，因此项目包含一个可选的 Windows 只读信息探针。在被控电脑的项目目录运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/report-windows-host-info.ps1 -KvmUrl http://开发板地址:8765
+```
+
+脚本把系统、整机型号、BIOS、CPU、GPU、内存频率、物理磁盘、分区和网络地址发送给开发板。开发板验证后保存为 `data/controlled-host.json`，设置面板和未来的板载 Agent 读取同一文件。详细字段和数据流见 `docs/HOST_INFO.md`。
 
 ## 计划架构
 

@@ -56,6 +56,48 @@ function modeLabel(capabilities, field) {
   return mode.pixel_format;
 }
 
+function formatBytes(value) {
+  if (value === null || value === undefined) return "--";
+  const size = Number(value);
+  if (!Number.isFinite(size) || size < 0) return "--";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let amount = size;
+  let unit = 0;
+  while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit += 1; }
+  return `${amount >= 100 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
+}
+
+function compact(values, separator = " · ") {
+  return values.filter((value) => value !== null && value !== undefined && String(value).trim() !== "").join(separator) || "--";
+}
+
+function updateHostInfo(report) {
+  const state = document.querySelector("#host-info-state");
+  const list = document.querySelector("#host-info-list");
+  const available = report?.status === "available" && report.data;
+  state.classList.toggle("error", report?.status === "error");
+  state.textContent = available ? "已同步" : report?.status === "error" ? "数据错误" : "未连接";
+  text("host-info-message", report?.message || "尚未收到被控主机信息");
+  list.hidden = !available;
+  if (!available) return;
+
+  const host = report.data;
+  text("host-collected-at", host.collected_at ? new Date(host.collected_at).toLocaleString() : "--");
+  text("host-name", host.hostname);
+  text("host-os", compact([host.os?.name, host.os?.version, host.os?.build ? `Build ${host.os.build}` : null, host.os?.architecture]));
+  text("host-system", compact([host.system?.manufacturer, host.system?.model]));
+  text("host-bios", compact([host.bios?.manufacturer, host.bios?.version, host.bios?.secure_boot == null ? null : `安全启动 ${host.bios?.secure_boot ? "开启" : "关闭"}`]));
+  text("host-cpu", compact([host.cpu?.model, host.cpu?.max_clock_mhz ? `${host.cpu.max_clock_mhz} MHz` : null]));
+  text("host-cores", compact([host.cpu?.physical_cores == null ? null : `${host.cpu.physical_cores} 核`, host.cpu?.logical_processors == null ? null : `${host.cpu.logical_processors} 线程`]));
+  text("host-gpu", (host.gpus || []).map((gpu) => compact([gpu.name, gpu.driver_version ? `驱动 ${gpu.driver_version}` : null])).join("\n") || "--");
+  text("host-memory", formatBytes(host.memory?.total_bytes));
+  const speeds = [...new Set((host.memory?.modules || []).map((module) => module.speed_mts).filter(Boolean))];
+  text("host-memory-speed", speeds.length ? speeds.map((speed) => `${speed} MT/s`).join("、") : "--");
+  text("host-disks", (host.disks || []).map((disk) => compact([disk.model, disk.interface, formatBytes(disk.size_bytes)])).join("\n") || "--");
+  text("host-volumes", (host.volumes || []).map((volume) => compact([volume.name, volume.label, volume.filesystem, `${formatBytes(volume.free_bytes)} 可用 / ${formatBytes(volume.size_bytes)}`])).join("\n") || "--");
+  text("host-addresses", (host.network?.addresses || []).join("\n") || "--");
+}
+
 function updateDevices(v4l2) {
   const devices = v4l2?.devices ?? [];
   elements.deviceCount.textContent = String(devices.length);
@@ -143,7 +185,7 @@ function updateStatus(payload) {
   text("info-backend", source?.backend); text("info-source", source?.source_id); text("info-health", source?.health);
   text("info-format", modeLabel(source?.capabilities, "format"));
   text("info-resolution", modeLabel(source?.capabilities, "resolution")); text("info-fps", modeLabel(source?.capabilities, "fps"));
-  text("info-error", source?.error || "无"); updateDevices(payload.v4l2); updateHidStatus(payload.hid);
+  text("info-error", source?.error || "无"); updateDevices(payload.v4l2); updateHidStatus(payload.hid); updateHostInfo(payload.controlled_host);
   if (elements.screenMenu.hidden) updateScreenOptions(payload);
 }
 

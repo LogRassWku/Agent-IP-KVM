@@ -120,6 +120,8 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertIn("键盘", page)
             self.assertIn("屏幕", page)
             self.assertIn('id="settings-panel"', page)
+            self.assertIn('id="host-info-list"', page)
+            self.assertIn('id="host-info-state"', page)
             self.assertIn('id="video-frame"', page)
             self.assertIn("No Signal", page)
             self.assertNotIn("暂无视频画面", page)

@@ -477,8 +477,12 @@ body.agent-mode .agent-shell { transform: translateX(0); }
 
 .info-section { padding: 18px 0; border-top: 1px solid var(--line); }
 .info-section h3 { margin: 0 0 14px; font-size: 13px; font-weight: 650; }
+.section-title-row h3 { margin-bottom: 0; }
 .section-title-row { justify-content: space-between; }
 .section-title-row span { min-width: 24px; padding: 3px 7px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); text-align: center; font-size: 11px; }
+.info-state.error { color: #ff858e; background: rgba(255, 96, 107, .12); }
+.host-info-list { margin-top: 10px; }
+.host-info-list dd { white-space: pre-line; }
 .info-list { margin: 0; }
 .info-list div { display: grid; grid-template-columns: 86px 1fr; gap: 12px; padding: 8px 0; }
 .info-list dt { color: var(--muted); font-size: 12px; }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <title>Agent IP KVM</title>
-    <link rel="stylesheet" href="/styles.css?v=20260906-7">
+    <link rel="stylesheet" href="/styles.css?v=20260906-9">
   </head>
   <body>
     <header class="topbar" id="topbar">
@@ -147,6 +147,29 @@
       </div>
 
       <section class="info-section">
+        <div class="section-title-row">
+          <h3>被控主机</h3>
+          <span class="info-state" id="host-info-state">未连接</span>
+        </div>
+        <p class="muted" id="host-info-message">尚未收到被控主机信息</p>
+        <dl class="info-list host-info-list" id="host-info-list" hidden>
+          <div><dt>更新时间</dt><dd id="host-collected-at">--</dd></div>
+          <div><dt>主机名</dt><dd id="host-name">--</dd></div>
+          <div><dt>系统</dt><dd id="host-os">--</dd></div>
+          <div><dt>设备</dt><dd id="host-system">--</dd></div>
+          <div><dt>BIOS</dt><dd id="host-bios">--</dd></div>
+          <div><dt>CPU</dt><dd id="host-cpu">--</dd></div>
+          <div><dt>核心</dt><dd id="host-cores">--</dd></div>
+          <div><dt>GPU</dt><dd id="host-gpu">--</dd></div>
+          <div><dt>内存</dt><dd id="host-memory">--</dd></div>
+          <div><dt>内存频率</dt><dd id="host-memory-speed">--</dd></div>
+          <div><dt>物理磁盘</dt><dd id="host-disks">--</dd></div>
+          <div><dt>分区</dt><dd id="host-volumes">--</dd></div>
+          <div><dt>网络地址</dt><dd id="host-addresses">--</dd></div>
+        </dl>
+      </section>
+
+      <section class="info-section">
         <h3>当前视频源</h3>
         <dl class="info-list">
           <div><dt>后端</dt><dd id="info-backend">--</dd></div>
@@ -169,6 +192,6 @@
       </section>
     </aside>
 
-    <script src="/app.js?v=20260906-7"></script>
+    <script src="/app.js?v=20260906-9"></script>
   </body>
 </html>
