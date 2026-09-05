@@ -258,7 +258,8 @@ function updateStatus(payload) {
 
 function updatePowerStatus(power) {
   const available = Boolean(power?.available);
-  elements.powerAction.disabled = !available;
+  elements.powerAction.disabled = false;
+  elements.powerAction.setAttribute("aria-disabled", String(!available));
   elements.powerMessage.textContent = power?.message || (available ? "可发送唤醒信号" : "未配置电源控制");
   elements.powerMessage.classList.toggle("available", available);
 }
@@ -1038,7 +1039,7 @@ elements.powerAction.addEventListener("click", async () => {
   } catch (error) {
     elements.powerMessage.textContent = error.message;
   } finally {
-    await refreshStatus();
+    elements.powerAction.disabled = false;
   }
 });
 elements.keyboardButton.addEventListener("click", () => setKeyboard(elements.keyboard.hidden));
