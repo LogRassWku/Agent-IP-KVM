@@ -35,7 +35,7 @@ def _rdk_plan():
 
 
 class HidRecoveryBundleTests(unittest.TestCase):
-    def test_writes_guarded_recovery_bundle_without_apply_script(self) -> None:
+    def test_writes_guarded_recovery_bundle_with_temporary_apply(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "recovery"
             bundle = write_recovery_bundle(_rdk_plan(), output)
@@ -43,6 +43,7 @@ class HidRecoveryBundleTests(unittest.TestCase):
             manifest = json.loads(bundle.manifest.read_text(encoding="utf-8"))
             preflight = bundle.preflight_script.read_text(encoding="utf-8")
             rollback = bundle.rollback_script.read_text(encoding="utf-8")
+            temporary_apply = bundle.temporary_apply_script.read_text(encoding="utf-8")
             instructions = bundle.instructions.read_text(encoding="utf-8")
 
             self.assertTrue(manifest["generated_only"])
@@ -53,7 +54,20 @@ class HidRecoveryBundleTests(unittest.TestCase):
             self.assertIn("hid.keyboard", rollback)
             self.assertIn("hid.mouse", rollback)
             self.assertIn("不依赖 USB QuickLink", instructions)
-            self.assertFalse((output / "apply.sh").exists())
+            self.assertIn('MODE="${1:---dry-run}"', temporary_apply)
+            self.assertIn("nohup sh -c", temporary_apply)
+            self.assertLess(
+                temporary_apply.index("nohup sh -c"),
+                temporary_apply.index('printf \'\' > "$GADGET/UDC"'),
+            )
+            self.assertIn("No keyboard or mouse report was sent", temporary_apply)
+            self.assertIn('ln -s functions/hid.keyboard "configs/$CONFIGURATION"', temporary_apply)
+            self.assertIn('if [ -n "$CURRENT_UDC" ]', rollback)
+            self.assertIn('rm -- "$OS_DESC_LINK"', rollback)
+            self.assertIn('ln -s "configs/$CONFIGURATION" os_desc', rollback)
+            self.assertIn('enabled OS descriptor configuration link is missing', temporary_apply)
+            self.assertEqual(bundle.keyboard_descriptor.read_bytes(), _rdk_plan().hid_functions[0].report_descriptor)
+            self.assertEqual(bundle.mouse_descriptor.read_bytes(), _rdk_plan().hid_functions[1].report_descriptor)
 
     def test_refuses_to_overwrite_nonempty_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

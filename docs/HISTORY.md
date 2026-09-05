@@ -195,6 +195,16 @@
 - 本地恢复说明要求提前建立不依赖 USB QuickLink 的串口或本地终端会话。文件包拒绝覆盖非空目录，避免破坏已有恢复资料。
 - 新增两项恢复包测试后，项目自动测试总数为二十五项，全部通过。RDK X5 在 `/tmp` 成功生成临时恢复包，两个脚本通过 shell 语法检查，只读预检查返回 `PASS`，回滚默认模式返回 dry-run；验证后 UDC 仍绑定 `35300000.usb`，Web 状态仍为 `streaming / available`，没有实际解绑或重绑 USB。
 
+## 2026-09-05：标准键盘与鼠标短时枚举通过
+
+- 在当前 Windows 开发电脑上记录枚举前基线：RDK X5 提供复合设备、RNDIS 网卡、只读存储和 Windows 不支持的 ECM 接口，没有键盘或鼠标接口。
+- 恢复包加入 `temporary-apply.sh` 和两份二进制报告描述符。脚本默认 dry-run；显式应用时先启动独立回滚看门狗，再修改 ConfigFS，超时时间限制为 20 至 300 秒。
+- 前三次受保护尝试因 ConfigFS 链接方式和 Windows OS Descriptor 配置顺序被拒绝；每次均立即恢复原 UDC、网络和存储功能，没有生成 HID 设备，也没有向电脑发送输入。
+- 通过未绑定的临时 Gadget 确认 ConfigFS 需要以配置目录作为 `ln` 目标；进一步确认修改功能链接前需要暂时移除 `os_desc/c.1`，完成后再恢复该链接。
+- 第四次 45 秒测试成功。Windows 识别 `HID Keyboard Device` 和 `HID-compliant mouse`，两个接口状态均为正常；RNDIS、复合设备和只读存储同时保持正常。
+- 测试期间没有打开 `/dev/hidg*`，因此没有发送键盘或鼠标报告。USB 重新枚举导致原 SSH 会话重置，符合预期。
+- 45 秒后看门狗自动执行精确回滚。Windows 的 HID 接口消失；开发板只剩 `ecm.0`、`mass_storage.0`、`rndis.0`，`os_desc/c.1` 和 `35300000.usb` 绑定均恢复，Web 状态为 `streaming / available`。
+
 ## 下一条记录
 
 发生以下任一事件时追加记录：

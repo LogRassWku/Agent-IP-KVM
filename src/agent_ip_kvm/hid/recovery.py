@@ -23,6 +23,9 @@ class RecoveryBundle:
     manifest: Path
     preflight_script: Path
     rollback_script: Path
+    temporary_apply_script: Path
+    keyboard_descriptor: Path
+    mouse_descriptor: Path
     instructions: Path
 
     def as_dict(self) -> dict[str, str]:
@@ -31,6 +34,9 @@ class RecoveryBundle:
             "manifest": str(self.manifest),
             "preflight_script": str(self.preflight_script),
             "rollback_script": str(self.rollback_script),
+            "temporary_apply_script": str(self.temporary_apply_script),
+            "keyboard_descriptor": str(self.keyboard_descriptor),
+            "mouse_descriptor": str(self.mouse_descriptor),
             "instructions": str(self.instructions),
         }
 
@@ -93,6 +99,7 @@ CONFIGFS_ROOT="${{AGENT_IP_KVM_CONFIGFS_ROOT:-/sys/kernel/config/usb_gadget}}"
 GADGET="$CONFIGFS_ROOT/{plan.gadget_name}"
 EXPECTED_UDC='{plan.udc}'
 CONFIGURATION='{configuration_name}'
+OS_DESC_LINK="$GADGET/os_desc/$CONFIGURATION"
 MODE="${{1:---dry-run}}"
 
 case "$MODE" in
@@ -114,17 +121,35 @@ esac
 [ -r "$GADGET/UDC" ] || {{ printf 'FAIL: UDC binding is unreadable\\n' >&2; exit 1; }}
 CURRENT_UDC="$(cat "$GADGET/UDC")"
 [ -z "$CURRENT_UDC" ] || [ "$CURRENT_UDC" = "$EXPECTED_UDC" ] || {{ printf 'FAIL: refusing to replace a different UDC binding\\n' >&2; exit 1; }}
+OS_DESC_WAS_LINKED=false
+if [ -L "$OS_DESC_LINK" ]; then
+  OS_DESC_WAS_LINKED=true
+fi
 
 for function_name in {existing}; do
   [ -d "$GADGET/functions/$function_name" ] || {{ printf 'FAIL: existing function %s is missing\\n' "$function_name" >&2; exit 1; }}
 done
 
+restore_os_desc() {{
+  if [ "$OS_DESC_WAS_LINKED" = true ] && [ ! -L "$OS_DESC_LINK" ]; then
+    (cd "$GADGET" && ln -s "configs/$CONFIGURATION" os_desc) || true
+  fi
+}}
+
 rebind() {{
-  printf '%s' "$EXPECTED_UDC" > "$GADGET/UDC" || true
+  restore_os_desc
+  if [ -r "$GADGET/UDC" ] && [ -z "$(cat "$GADGET/UDC")" ]; then
+    printf '%s' "$EXPECTED_UDC" > "$GADGET/UDC" || true
+  fi
 }}
 
 trap rebind EXIT HUP INT TERM
-printf '' > "$GADGET/UDC"
+if [ -n "$CURRENT_UDC" ]; then
+  printf '' > "$GADGET/UDC"
+fi
+if [ "$OS_DESC_WAS_LINKED" = true ]; then
+  rm -- "$OS_DESC_LINK"
+fi
 
 for function_name in {hid}; do
   link="$GADGET/configs/$CONFIGURATION/$function_name"
@@ -154,7 +179,7 @@ def _instructions(plan: CompositeGadgetPlan, configuration_name: str) -> str:
 2. 保持该本地会话处于打开状态，并确认能够执行管理员命令。
 3. 在当前状态下运行 `./preflight.sh`，只有显示 `PASS` 才能继续。
 4. 先运行 `./rollback.sh` 查看默认预览；它不会修改 USB。
-5. 未来真正应用 HID 前，应另设自动超时回滚。本文件包当前不包含应用脚本。
+5. `temporary-apply.sh` 只用于短时枚举测试，必须显式传入 `--apply`，并会自动调用回滚脚本。
 
 ## 需要恢复时
 
@@ -169,6 +194,102 @@ sudo ./rollback.sh --apply
 现有的 {", ".join(plan.existing_functions)}。
 
 如果 Gadget 名称、UDC 或现有功能已变化，不要使用旧文件包，应重新探测并生成。
+"""
+
+
+def _temporary_apply_script(plan: CompositeGadgetPlan, configuration_name: str) -> str:
+    existing = _shell_words(plan.existing_functions)
+    return f"""#!/bin/sh
+set -eu
+
+CONFIGFS_ROOT="${{AGENT_IP_KVM_CONFIGFS_ROOT:-/sys/kernel/config/usb_gadget}}"
+GADGET="$CONFIGFS_ROOT/{plan.gadget_name}"
+EXPECTED_UDC='{plan.udc}'
+CONFIGURATION='{configuration_name}'
+OS_DESC_LINK="$GADGET/os_desc/$CONFIGURATION"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+STATE_DIR="${{AGENT_IP_KVM_HID_STATE_DIR:-/run/agent-ip-kvm-hid}}"
+MODE="${{1:---dry-run}}"
+ROLLBACK_AFTER="${{2:-45}}"
+
+case "$MODE" in
+  --dry-run)
+    printf 'DRY RUN: would add standard keyboard and mouse functions for %s seconds\\n' "$ROLLBACK_AFTER"
+    printf 'Automatic rollback would start before USB is unbound\\n'
+    printf 'No USB configuration was changed\\n'
+    exit 0
+    ;;
+  --apply) ;;
+  *)
+    printf 'Usage: %s [--dry-run|--apply] [rollback-seconds]\\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+case "$ROLLBACK_AFTER" in
+  *[!0-9]*|'') printf 'FAIL: rollback-seconds must be an integer\\n' >&2; exit 1 ;;
+esac
+[ "$ROLLBACK_AFTER" -ge 20 ] && [ "$ROLLBACK_AFTER" -le 300 ] || {{ printf 'FAIL: rollback-seconds must be 20..300\\n' >&2; exit 1; }}
+[ "$(id -u)" -eq 0 ] || {{ printf 'FAIL: --apply requires root\\n' >&2; exit 1; }}
+[ -d "$GADGET/configs/$CONFIGURATION" ] || {{ printf 'FAIL: expected gadget configuration was not found\\n' >&2; exit 1; }}
+[ "$(cat "$GADGET/UDC")" = "$EXPECTED_UDC" ] || {{ printf 'FAIL: UDC binding changed after plan generation\\n' >&2; exit 1; }}
+[ -s "$SCRIPT_DIR/keyboard-report-desc.bin" ] || {{ printf 'FAIL: keyboard descriptor is missing\\n' >&2; exit 1; }}
+[ -s "$SCRIPT_DIR/mouse-report-desc.bin" ] || {{ printf 'FAIL: mouse descriptor is missing\\n' >&2; exit 1; }}
+if [ -r "$GADGET/os_desc/use" ] && [ "$(cat "$GADGET/os_desc/use")" = 1 ]; then
+  [ -L "$OS_DESC_LINK" ] || {{ printf 'FAIL: enabled OS descriptor configuration link is missing\\n' >&2; exit 1; }}
+fi
+
+for function_name in {existing}; do
+  [ -d "$GADGET/functions/$function_name" ] || {{ printf 'FAIL: existing function %s is missing\\n' "$function_name" >&2; exit 1; }}
+done
+
+for function_name in 'hid.keyboard' 'hid.mouse'; do
+  [ ! -e "$GADGET/functions/$function_name" ] || {{ printf 'FAIL: function %s already exists\\n' "$function_name" >&2; exit 1; }}
+done
+
+mkdir -p "$STATE_DIR"
+rm -f "$STATE_DIR/cancel" "$STATE_DIR/rollback.log"
+nohup sh -c 'sleep "$1"; if [ ! -e "$2/cancel" ]; then "$3/rollback.sh" --apply > "$2/rollback.log" 2>&1; fi' sh "$ROLLBACK_AFTER" "$STATE_DIR" "$SCRIPT_DIR" </dev/null >/dev/null 2>&1 &
+printf '%s\\n' "$!" > "$STATE_DIR/watchdog.pid"
+
+ROLLBACK_NEEDED=true
+rollback_on_exit() {{
+  if [ "$ROLLBACK_NEEDED" = true ]; then
+    "$SCRIPT_DIR/rollback.sh" --apply || true
+  fi
+}}
+trap rollback_on_exit EXIT HUP INT TERM
+
+printf '' > "$GADGET/UDC"
+OS_DESC_WAS_LINKED=false
+if [ -L "$OS_DESC_LINK" ]; then
+  OS_DESC_WAS_LINKED=true
+  rm -- "$OS_DESC_LINK"
+fi
+mkdir "$GADGET/functions/hid.keyboard"
+printf '1' > "$GADGET/functions/hid.keyboard/protocol"
+printf '1' > "$GADGET/functions/hid.keyboard/subclass"
+printf '8' > "$GADGET/functions/hid.keyboard/report_length"
+cat "$SCRIPT_DIR/keyboard-report-desc.bin" > "$GADGET/functions/hid.keyboard/report_desc"
+
+mkdir "$GADGET/functions/hid.mouse"
+printf '2' > "$GADGET/functions/hid.mouse/protocol"
+printf '1' > "$GADGET/functions/hid.mouse/subclass"
+printf '4' > "$GADGET/functions/hid.mouse/report_length"
+cat "$SCRIPT_DIR/mouse-report-desc.bin" > "$GADGET/functions/hid.mouse/report_desc"
+
+cd "$GADGET"
+ln -s functions/hid.keyboard "configs/$CONFIGURATION"
+ln -s functions/hid.mouse "configs/$CONFIGURATION"
+if [ "$OS_DESC_WAS_LINKED" = true ]; then
+  ln -s "configs/$CONFIGURATION" os_desc
+fi
+printf '%s' "$EXPECTED_UDC" > "$GADGET/UDC"
+
+ROLLBACK_NEEDED=false
+trap - EXIT HUP INT TERM
+printf 'Temporary HID enumeration active; automatic rollback in %s seconds\\n' "$ROLLBACK_AFTER"
+printf 'No keyboard or mouse report was sent\\n'
 """
 
 
@@ -191,6 +312,9 @@ def write_recovery_bundle(
     manifest = output_directory / "manifest.json"
     preflight = output_directory / "preflight.sh"
     rollback = output_directory / "rollback.sh"
+    temporary_apply = output_directory / "temporary-apply.sh"
+    keyboard_descriptor = output_directory / "keyboard-report-desc.bin"
+    mouse_descriptor = output_directory / "mouse-report-desc.bin"
     instructions = output_directory / "LOCAL_RECOVERY.md"
 
     manifest.write_text(
@@ -209,8 +333,23 @@ def write_recovery_bundle(
     )
     preflight.write_text(_preflight_script(plan, configuration_name), encoding="utf-8", newline="\n")
     rollback.write_text(_rollback_script(plan, configuration_name), encoding="utf-8", newline="\n")
+    temporary_apply.write_text(
+        _temporary_apply_script(plan, configuration_name), encoding="utf-8", newline="\n"
+    )
+    keyboard_descriptor.write_bytes(plan.hid_functions[0].report_descriptor)
+    mouse_descriptor.write_bytes(plan.hid_functions[1].report_descriptor)
     instructions.write_text(_instructions(plan, configuration_name), encoding="utf-8", newline="\n")
     preflight.chmod(0o755)
     rollback.chmod(0o755)
+    temporary_apply.chmod(0o755)
 
-    return RecoveryBundle(output_directory, manifest, preflight, rollback, instructions)
+    return RecoveryBundle(
+        output_directory,
+        manifest,
+        preflight,
+        rollback,
+        temporary_apply,
+        keyboard_descriptor,
+        mouse_descriptor,
+        instructions,
+    )

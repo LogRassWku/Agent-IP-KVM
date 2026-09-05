@@ -86,7 +86,9 @@ PYTHONPATH=src python -m agent_ip_kvm.hid_cli \
   --write-recovery-bundle ./hid-recovery
 ```
 
-文件包包含状态清单、只读预检查、回滚脚本和本地恢复说明。回滚脚本默认只显示将要执行的操作；实际恢复必须从不依赖 USB QuickLink 的本地会话中，以管理员身份显式运行 `./rollback.sh --apply`。当前没有生成 HID 应用脚本。
+文件包包含状态清单、只读预检查、回滚脚本、临时枚举脚本和本地恢复说明。回滚与临时枚举脚本默认都只显示计划；临时枚举只有显式运行 `sudo ./temporary-apply.sh --apply 45` 才会重绑 USB，并会在 45 秒后自动恢复。该脚本只建立键盘和鼠标接口，不打开 `/dev/hidg*`，因此不会发送输入。持久化应用尚未实现。
+
+RDK X5 已在 Windows 电脑上完成一次 45 秒实测：系统正常识别 `HID Keyboard Device` 和 `HID-compliant mouse`，原有 RNDIS 与只读存储同时保留；自动回滚后两个 HID 接口消失，QuickLink 和 Web 服务恢复。测试没有发送任何按键或鼠标报告。
 
 ## 启动最小 Web 界面
 
