@@ -23,7 +23,7 @@ button { color: inherit; font: inherit; }
 .topbar {
   position: fixed;
   inset: 0 0 auto 0;
-  z-index: 20;
+  z-index: 50;
   height: var(--topbar-height);
   display: flex;
   justify-content: flex-end;
@@ -37,7 +37,7 @@ button { color: inherit; font: inherit; }
 
 .tools, .tool-menu, .tool-button, .section-title-row, .no-signal { display: flex; align-items: center; }
 
-.tools { gap: 6px; transition: opacity 220ms ease, transform 360ms ease, visibility 0s linear 360ms; }
+.tools { position: relative; z-index: 51; gap: 6px; pointer-events: auto; transition: opacity 220ms ease, transform 360ms ease, visibility 0s linear 360ms; }
 .tool-menu { position: relative; }
 
 .agent-mode-button {
@@ -181,6 +181,7 @@ body.agent-mode .agent-topbar-title { opacity: 1; visibility: visible; transform
   width: 100%;
   height: auto;
   overflow: hidden;
+  z-index: 1;
   background: #05070b;
   transform: translateX(0);
   transition: transform 480ms cubic-bezier(.22, .78, .2, 1);
@@ -433,6 +434,7 @@ body.agent-mode .agent-shell { transform: translateX(0); }
 
 .no-signal {
   gap: 10px;
+  pointer-events: none;
   color: #a8b1bf;
   font-size: 15px;
   font-weight: 560;
