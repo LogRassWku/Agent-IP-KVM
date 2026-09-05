@@ -215,9 +215,12 @@ class LinuxGadgetHidAdapter(HidAdapter):
     def _normalise_key(key: str) -> str:
         if not isinstance(key, str):
             raise TypeError("key must be a string")
-        normalised = key.strip().lower().replace("-", "_").replace(" ", "_")
+        normalised = key.strip().lower()
         if not normalised:
             raise ValueError("key must not be empty")
+        if normalised in KEY_USAGES or normalised in MODIFIER_BITS:
+            return normalised
+        normalised = normalised.replace("-", "_").replace(" ", "_")
         return normalised
 
     @staticmethod

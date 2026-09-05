@@ -96,6 +96,17 @@ class LinuxGadgetHidAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.adapter.mouse_position(32768, 0)
 
+    def test_preserves_literal_hyphen_key_while_normalising_modifier_aliases(self) -> None:
+        self.adapter.arm()
+        self.adapter.key_down("-")
+        self.adapter.key_up("-")
+        self.adapter.key_down("left-shift")
+
+        reports = self.factory.writers[self.keyboard].reports
+        self.assertEqual(reports[1], bytes((0, 0, 0x2D, 0, 0, 0, 0, 0)))
+        self.assertEqual(reports[2], bytes(8))
+        self.assertEqual(reports[3], bytes((0x02, 0, 0, 0, 0, 0, 0, 0)))
+
     def test_open_failure_enters_error_state(self) -> None:
         def fail(_: Path) -> FakeWriter:
             raise OSError("missing")
