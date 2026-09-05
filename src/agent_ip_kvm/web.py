@@ -795,6 +795,33 @@ def observe_stream(stream: StreamProvider, config: WebConfig) -> dict[str, objec
     return {"frame": metadata, "recognition": recognition}
 
 
+def build_remote_agent_system_prompt(
+    config: WebConfig,
+    host_status: dict[str, object],
+    stream_status: dict[str, object],
+    hid_status: dict[str, object],
+) -> str:
+    """Describe the board, target and safe capabilities to a remote model."""
+    host_data = host_status.get("data") if isinstance(host_status, dict) else None
+    if not isinstance(host_data, dict):
+        host_data = {}
+    # Keep the prompt bounded while retaining the detailed disk and device data.
+    host_json = json.dumps(host_data, ensure_ascii=False, separators=(",", ":"))[:24000]
+    return (
+        "你是 Agent IP KVM 的远程模型，运行在一块 Linux ARM64 开发板的服务端代理中。\n"
+        "你的职责是帮助用户理解并规划对被控电脑的操作；不要把自己描述成普通云端聊天机器人。\n"
+        f"开发板项目目录：/home/sunrise/agent-ip-kvm-app（配置和主机清单位于该目录的 data/ 下）；视频后端：{config.source_kind}。\n"
+        f"当前视频源状态：{json.dumps(stream_status, ensure_ascii=False, separators=(',', ':'))[:2000]}\n"
+        f"当前 HID 状态：{json.dumps(hid_status, ensure_ascii=False, separators=(',', ':'))[:1000]}\n"
+        "开发板已经缓存了下面这份被控主机只读清单。回答系统、CPU、GPU、内存、磁盘、分区、BIOS 等问题时，优先使用这份清单；"
+        "不要声称需要用户在开发板上手动查文件，也不要编造未提供的字段。\n"
+        f"被控主机清单（controlled-host.json）：{host_json}\n"
+        "当前远程模型只能生成说明和建议，不能绕过开发板策略直接发送键盘、鼠标、Shell、BIOS 或磁盘操作。"
+        "涉及重启、安装、BIOS、分区、固件等高风险动作时，必须先给出目标、步骤、风险、预期结果和恢复方法，并明确等待用户批准。"
+        "如果缺少画面证据或主机字段，直说未知，并建议通过 KVM 按需截图或只读探针补充证据。"
+    )
+
+
 def _read_asset(name: str) -> bytes:
     return files("agent_ip_kvm").joinpath("web_assets", name).read_bytes()
 
@@ -1062,7 +1089,20 @@ def create_handler(
                     }
                 elif path == "/api/agent/chat":
                     messages = payload.get("messages")
-                    response = remote_model.chat(messages)
+                    if not isinstance(messages, list):
+                        raise RemoteModelError("messages must be an array")
+                    conversation = []
+                    for message in messages:
+                        if not isinstance(message, dict) or message.get("role") not in {"user", "assistant"}:
+                            raise RemoteModelError("remote chat only accepts user and assistant messages")
+                        conversation.append(message)
+                    system = build_remote_agent_system_prompt(
+                        config,
+                        host_info.status(),
+                        stream.status(),
+                        hid.status(),
+                    )
+                    response = remote_model.chat([{"role": "system", "content": system}, *conversation])
                     result = {"response": response}
                 else:
                     hid.release_all()

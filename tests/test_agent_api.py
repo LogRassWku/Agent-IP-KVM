@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from agent_ip_kvm.hid import SimulatedHidAdapter
-from agent_ip_kvm.web import HidWebController, WebConfig, create_handler
+from agent_ip_kvm.web import HidWebController, WebConfig, build_remote_agent_system_prompt, create_handler
 
 
 class SnapshotStream:
@@ -106,6 +106,18 @@ class AgentApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/api/agent/audit", timeout=2) as response:
             events = json.load(response)["events"]
         self.assertEqual(events[-1]["event"], "plan_execution_completed")
+
+    def test_remote_agent_prompt_contains_board_and_host_context(self):
+        prompt = build_remote_agent_system_prompt(
+            WebConfig(source_kind="v4l2"),
+            {"data": {"hostname": "TARGET", "volumes": [{"name": "C:"}]}},
+            {"state": "idle"},
+            {"enabled": True},
+        )
+        self.assertIn("/home/sunrise/agent-ip-kvm-app", prompt)
+        self.assertIn("TARGET", prompt)
+        self.assertIn("v4l2", prompt)
+        self.assertIn("必须先给出目标、步骤、风险", prompt)
 
     def test_snapshot_and_authenticated_pc_agent_relay(self):
         with urlopen(self.base_url + "/api/video/snapshot.jpg", timeout=2) as response:
