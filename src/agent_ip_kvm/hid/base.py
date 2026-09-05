@@ -49,6 +49,10 @@ class HidAdapter(ABC):
     def mouse_move(self, delta_x: int, delta_y: int, wheel: int = 0) -> None:
         """Send one relative mouse movement and optional wheel movement."""
 
+    def mouse_position(self, x: int, y: int, wheel: int = 0) -> None:
+        """Place the pointer at absolute coordinates in the 0..32767 range."""
+        raise HidError("absolute pointer output is not available")
+
     @abstractmethod
     def button_down(self, button: MouseButton) -> None:
         """Press one mouse button and keep it held until released."""

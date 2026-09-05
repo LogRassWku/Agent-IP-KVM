@@ -210,6 +210,20 @@ class HidWebController:
                 adapter.mouse_move(0, 0, wheel)
         return {"delta_x": delta_x, "delta_y": delta_y, "wheel": wheel}
 
+    def position_mouse(self, payload: dict[str, object]) -> dict[str, object]:
+        adapter = self._require_adapter()
+        x = self._integer(payload.get("x"), "x")
+        y = self._integer(payload.get("y"), "y")
+        wheel = self._integer(payload.get("wheel", 0), "wheel")
+        if not 0 <= x <= 32767 or not 0 <= y <= 32767:
+            raise ValueError("mouse position must be between 0 and 32767")
+        if not -127 <= wheel <= 127:
+            raise ValueError("wheel must be between -127 and 127")
+        with self._lock:
+            self._arm(adapter)
+            adapter.mouse_position(x, y, wheel)
+        return {"x": x, "y": y, "wheel": wheel}
+
     def click_mouse(self, payload: dict[str, object]) -> dict[str, object]:
         adapter = self._require_adapter()
         name = payload.get("button")
@@ -218,6 +232,12 @@ class HidWebController:
         button = self._MOUSE_BUTTONS[name]
         with self._lock:
             self._arm(adapter)
+            if "x" in payload or "y" in payload:
+                x = self._integer(payload.get("x"), "x")
+                y = self._integer(payload.get("y"), "y")
+                if not 0 <= x <= 32767 or not 0 <= y <= 32767:
+                    raise ValueError("mouse position must be between 0 and 32767")
+                adapter.mouse_position(x, y)
             operation_error: Exception | None = None
             try:
                 adapter.button_down(button)
@@ -265,8 +285,8 @@ class HidWebController:
             raise HidError(f"HID is not ready: {adapter.state.value}")
 
 
-HidDeviceResolver = Callable[[], tuple[Path, Path] | None]
-HidAdapterFactory = Callable[[Path, Path], HidAdapter]
+HidDeviceResolver = Callable[[], tuple[Path, Path, Path] | None]
+HidAdapterFactory = Callable[[Path, Path, Path], HidAdapter]
 
 
 def _linux_hid_device_resolver(
@@ -274,8 +294,9 @@ def _linux_hid_device_resolver(
     dev_root: Path = Path("/dev"),
     keyboard_function: str = "hid.keyboard",
     mouse_function: str = "hid.mouse",
+    pointer_function: str = "hid.pointer",
 ) -> HidDeviceResolver:
-    def resolve() -> tuple[Path, Path] | None:
+    def resolve() -> tuple[Path, Path, Path] | None:
         try:
             udc_name = (gadget_root / "UDC").read_text(encoding="ascii").strip()
             if not udc_name:
@@ -288,9 +309,13 @@ def _linux_hid_device_resolver(
             functions = gadget_root / "functions"
             keyboard_path = resolve_hidg_path(functions / keyboard_function, dev_root)
             mouse_path = resolve_hidg_path(functions / mouse_function, dev_root)
-            if not os.access(keyboard_path, os.W_OK) or not os.access(mouse_path, os.W_OK):
+            pointer_path = resolve_hidg_path(functions / pointer_function, dev_root)
+            if not all(
+                os.access(path, os.W_OK)
+                for path in (keyboard_path, mouse_path, pointer_path)
+            ):
                 return None
-            return keyboard_path, mouse_path
+            return keyboard_path, mouse_path, pointer_path
         except (OSError, HidError):
             return None
 
@@ -303,12 +328,16 @@ class AutoLinuxHidController(HidWebController):
     def __init__(
         self,
         device_resolver: HidDeviceResolver,
-        adapter_factory: HidAdapterFactory = LinuxGadgetHidAdapter,
+        adapter_factory: HidAdapterFactory | None = None,
     ) -> None:
         super().__init__(backend="linux-auto")
         self._device_resolver = device_resolver
-        self._adapter_factory = adapter_factory
-        self._device_signature: tuple[Path, Path] | None = None
+        self._adapter_factory = adapter_factory or (
+            lambda keyboard, mouse, pointer: LinuxGadgetHidAdapter(
+                keyboard, mouse, pointer_path=pointer
+            )
+        )
+        self._device_signature: tuple[Path, Path, Path] | None = None
 
     def status(self) -> dict[str, object]:
         self._sync()
@@ -632,6 +661,7 @@ def create_handler(
                 "/api/video-settings",
                 "/api/hid/key",
                 "/api/hid/mouse-move",
+                "/api/hid/mouse-position",
                 "/api/hid/mouse-click",
                 "/api/hid/release",
             }:
@@ -674,6 +704,8 @@ def create_handler(
                     result = {"hid": hid.tap_key(payload)}
                 elif path == "/api/hid/mouse-move":
                     result = {"hid": hid.move_mouse(payload)}
+                elif path == "/api/hid/mouse-position":
+                    result = {"hid": hid.position_mouse(payload)}
                 elif path == "/api/hid/mouse-click":
                     result = {"hid": hid.click_mouse(payload)}
                 else:
@@ -841,6 +873,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--keyboard-function", default="hid.keyboard")
     parser.add_argument("--mouse-function", default="hid.mouse")
+    parser.add_argument("--pointer-function", default="hid.pointer")
     parser.add_argument("--hid-timeout", type=float, default=10.0)
     return parser
 
@@ -865,6 +898,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.gadget_root,
                 keyboard_function=args.keyboard_function,
                 mouse_function=args.mouse_function,
+                pointer_function=args.pointer_function,
             )
         )
     elif args.enable_hid:
@@ -878,7 +912,12 @@ def main(argv: list[str] | None = None) -> int:
             mouse_path = wait_for_hidg_path(
                 functions / args.mouse_function, timeout_seconds=args.hid_timeout
             )
-            hid_adapter = LinuxGadgetHidAdapter(keyboard_path, mouse_path)
+            pointer_path = wait_for_hidg_path(
+                functions / args.pointer_function, timeout_seconds=args.hid_timeout
+            )
+            hid_adapter = LinuxGadgetHidAdapter(
+                keyboard_path, mouse_path, pointer_path=pointer_path
+            )
     server = create_server(
         args.host,
         args.port,

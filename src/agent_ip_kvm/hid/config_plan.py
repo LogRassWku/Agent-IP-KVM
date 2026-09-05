@@ -5,7 +5,11 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-from .descriptors import BOOT_KEYBOARD_REPORT_DESCRIPTOR, RELATIVE_MOUSE_REPORT_DESCRIPTOR
+from .descriptors import (
+    ABSOLUTE_POINTER_REPORT_DESCRIPTOR,
+    BOOT_KEYBOARD_REPORT_DESCRIPTOR,
+    RELATIVE_MOUSE_REPORT_DESCRIPTOR,
+)
 from .probe import GadgetInfo, HidProbeReport, HidProbeStatus
 
 
@@ -51,6 +55,15 @@ MOUSE_FUNCTION = HidFunctionPlan(
     subclass=1,
     report_length=4,
     report_descriptor=RELATIVE_MOUSE_REPORT_DESCRIPTOR,
+)
+
+POINTER_FUNCTION = HidFunctionPlan(
+    name="hid.pointer",
+    role="absolute_pointer",
+    protocol=0,
+    subclass=0,
+    report_length=6,
+    report_descriptor=ABSOLUTE_POINTER_REPORT_DESCRIPTOR,
 )
 
 
@@ -113,7 +126,14 @@ def build_composite_gadget_plan(
     selected = _select_gadget(report, gadget_name)
     existing_functions = selected.functions if selected else ()
     planned_functions = tuple(
-        dict.fromkeys((*existing_functions, KEYBOARD_FUNCTION.name, MOUSE_FUNCTION.name))
+        dict.fromkeys(
+            (
+                *existing_functions,
+                KEYBOARD_FUNCTION.name,
+                MOUSE_FUNCTION.name,
+                POINTER_FUNCTION.name,
+            )
+        )
     )
     udc = selected.udc if selected and selected.udc else report.udcs[0].name
     requires_rebind = bool(selected and selected.udc)
@@ -133,7 +153,7 @@ def build_composite_gadget_plan(
         udc=udc,
         existing_functions=existing_functions,
         planned_functions=planned_functions,
-        hid_functions=(KEYBOARD_FUNCTION, MOUSE_FUNCTION),
+        hid_functions=(KEYBOARD_FUNCTION, MOUSE_FUNCTION, POINTER_FUNCTION),
         retains_management_network=retains_management_network,
         requires_rebind=requires_rebind,
         requires_local_recovery=requires_local_recovery,

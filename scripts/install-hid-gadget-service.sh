@@ -43,12 +43,15 @@ destination = Path(sys.argv[1])
 (destination / "mouse-report-desc.bin").write_bytes(bytes.fromhex(
     "05010902a1010901a1000509190129051500250195057501810295017503810105010930093109381581257f750895038106c0c0"
 ))
+(destination / "pointer-report-desc.bin").write_bytes(bytes.fromhex(
+    "05010902a1010901a1000509190129051500250195057501810295017503810105010930093116000026ff7f75109502810209381581257f750895018106c0c0"
+))
 PY
 chmod 0644 "$INSTALL_DIR"/*-report-desc.bin
 
 cat > "$UNIT_PATH" <<'UNIT'
 [Unit]
-Description=Add Agent IP KVM keyboard and mouse to the existing USB Gadget
+Description=Add Agent IP KVM keyboard and pointer devices to the existing USB Gadget
 After=hobot-usb-gadget.service
 Wants=hobot-usb-gadget.service
 
@@ -63,5 +66,6 @@ UNIT
 
 systemctl daemon-reload
 systemctl disable "$UNIT_NAME" 2>/dev/null || true
-systemctl enable --now "$UNIT_NAME"
+systemctl enable "$UNIT_NAME"
+systemctl restart "$UNIT_NAME"
 echo "Installed persistent Agent IP KVM HID Gadget service."

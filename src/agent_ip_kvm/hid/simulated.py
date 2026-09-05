@@ -13,6 +13,7 @@ class SimulatedEventKind(str, Enum):
     KEY_DOWN = "key_down"
     KEY_UP = "key_up"
     MOUSE_MOVE = "mouse_move"
+    MOUSE_POSITION = "mouse_position"
     BUTTON_DOWN = "button_down"
     BUTTON_UP = "button_up"
     RELEASE_ALL = "release_all"
@@ -29,6 +30,8 @@ class SimulatedHidEvent:
     delta_x: int = 0
     delta_y: int = 0
     wheel: int = 0
+    x: int = 0
+    y: int = 0
 
 
 class SimulatedHidAdapter(HidAdapter):
@@ -120,6 +123,20 @@ class SimulatedHidAdapter(HidAdapter):
             delta_y=delta_y,
             wheel=wheel,
         )
+
+    def mouse_position(self, x: int, y: int, wheel: int = 0) -> None:
+        self._require_ready()
+        self._validate_absolute_axis(x, "x")
+        self._validate_absolute_axis(y, "y")
+        self._validate_axis(wheel, "wheel")
+        self._record(SimulatedEventKind.MOUSE_POSITION, x=x, y=y, wheel=wheel)
+
+    @staticmethod
+    def _validate_absolute_axis(value: int, name: str) -> None:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+        if not 0 <= value <= 32767:
+            raise ValueError(f"{name} must be between 0 and 32767")
 
     def button_down(self, button: MouseButton) -> None:
         self._require_ready()

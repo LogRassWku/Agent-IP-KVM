@@ -96,7 +96,8 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertIn('id="zoom-in"', page)
             self.assertNotIn('id="zoom-range"', page)
             self.assertIn('id="cursor-size-select"', page)
-            self.assertIn('id="mouse-capture"', page)
+            self.assertNotIn('id="mouse-capture"', page)
+            self.assertIn("鼠标移入视频画面后", page)
             self.assertIn('id="onscreen-keyboard"', page)
             self.assertIn('data-key="enter"', page)
             self.assertIn('id="resolution-select"', page)
@@ -172,6 +173,16 @@ class WebInterfaceTests(unittest.TestCase):
         )
         self.assertEqual(adapter.pressed_buttons, frozenset())
 
+    def test_hid_controller_maps_absolute_pointer_position(self) -> None:
+        adapter = SimulatedHidAdapter()
+        controller = HidWebController(adapter, backend="simulated")
+
+        position = controller.position_mouse({"x": 16384, "y": 8192, "wheel": -1})
+
+        self.assertEqual(position, {"x": 16384, "y": 8192, "wheel": -1})
+        self.assertEqual(adapter.events[-1].kind, SimulatedEventKind.MOUSE_POSITION)
+        self.assertEqual((adapter.events[-1].x, adapter.events[-1].y), (16384, 8192))
+
     def test_auto_hid_controller_tracks_endpoint_connection(self) -> None:
         current = {"devices": None}
         adapters = []
@@ -179,7 +190,7 @@ class WebInterfaceTests(unittest.TestCase):
         def resolver():
             return current["devices"]
 
-        def factory(keyboard, mouse):
+        def factory(keyboard, mouse, pointer):
             adapter = SimulatedHidAdapter()
             adapters.append(adapter)
             return adapter
@@ -187,7 +198,7 @@ class WebInterfaceTests(unittest.TestCase):
         controller = AutoLinuxHidController(resolver, factory)
         self.assertEqual(controller.status()["state"], "disconnected")
 
-        current["devices"] = ("keyboard", "mouse")
+        current["devices"] = ("keyboard", "mouse", "pointer")
         self.assertTrue(controller.status()["enabled"])
         controller.tap_key({"key": "a", "modifiers": []})
         self.assertEqual(adapters[0].pressed_keys, frozenset())
@@ -235,6 +246,17 @@ class WebInterfaceTests(unittest.TestCase):
             payload = json.load(response)
             self.assertEqual(response.status, 200)
             self.assertEqual(payload["hid"]["delta_x"], 12)
+
+        request = Request(
+            f"{self.base_url}/api/hid/mouse-position",
+            data=json.dumps({"x": 32767, "y": 0, "wheel": 0}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["hid"]["x"], 32767)
 
         request = Request(
             f"{self.base_url}/api/hid/mouse-click",

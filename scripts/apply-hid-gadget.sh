@@ -10,6 +10,7 @@ OS_DESC_LINK="$GADGET/os_desc/$CONFIGURATION"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 KEYBOARD_FUNCTION=hid.keyboard
 MOUSE_FUNCTION=hid.mouse
+POINTER_FUNCTION=hid.pointer
 
 fail() {
     echo "FAIL: $*" >&2
@@ -52,9 +53,10 @@ restore_os_descriptor() {
 }
 
 remove_project_functions() {
-    rm -f "$CONFIG/$KEYBOARD_FUNCTION" "$CONFIG/$MOUSE_FUNCTION"
+    rm -f "$CONFIG/$KEYBOARD_FUNCTION" "$CONFIG/$MOUSE_FUNCTION" "$CONFIG/$POINTER_FUNCTION"
     rmdir "$GADGET/functions/$KEYBOARD_FUNCTION" 2>/dev/null || true
     rmdir "$GADGET/functions/$MOUSE_FUNCTION" 2>/dev/null || true
+    rmdir "$GADGET/functions/$POINTER_FUNCTION" 2>/dev/null || true
 }
 
 apply_hid() {
@@ -62,19 +64,30 @@ apply_hid() {
     wait_for_gadget
     [ -r "$SCRIPT_DIR/keyboard-report-desc.bin" ] || fail "keyboard descriptor is missing"
     [ -r "$SCRIPT_DIR/mouse-report-desc.bin" ] || fail "mouse descriptor is missing"
+    [ -r "$SCRIPT_DIR/pointer-report-desc.bin" ] || fail "pointer descriptor is missing"
 
     if [ -d "$GADGET/functions/$KEYBOARD_FUNCTION" ] && \
        [ -d "$GADGET/functions/$MOUSE_FUNCTION" ] && \
+       [ -d "$GADGET/functions/$POINTER_FUNCTION" ] && \
        [ -L "$CONFIG/$KEYBOARD_FUNCTION" ] && \
-       [ -L "$CONFIG/$MOUSE_FUNCTION" ]; then
+       [ -L "$CONFIG/$MOUSE_FUNCTION" ] && \
+       [ -L "$CONFIG/$POINTER_FUNCTION" ]; then
         echo "Agent IP KVM HID functions are already active."
         return
     fi
 
-    [ ! -e "$GADGET/functions/$KEYBOARD_FUNCTION" ] || fail "$KEYBOARD_FUNCTION already exists in a partial or foreign configuration"
-    [ ! -e "$GADGET/functions/$MOUSE_FUNCTION" ] || fail "$MOUSE_FUNCTION already exists in a partial or foreign configuration"
-    [ ! -e "$CONFIG/$KEYBOARD_FUNCTION" ] || fail "$KEYBOARD_FUNCTION link already exists"
-    [ ! -e "$CONFIG/$MOUSE_FUNCTION" ] || fail "$MOUSE_FUNCTION link already exists"
+    CREATE_KEYBOARD=1
+    CREATE_MOUSE=1
+    if [ -e "$GADGET/functions/$KEYBOARD_FUNCTION" ] || [ -e "$CONFIG/$KEYBOARD_FUNCTION" ]; then
+        [ -d "$GADGET/functions/$KEYBOARD_FUNCTION" ] && [ -L "$CONFIG/$KEYBOARD_FUNCTION" ] || fail "$KEYBOARD_FUNCTION is partial"
+        CREATE_KEYBOARD=0
+    fi
+    if [ -e "$GADGET/functions/$MOUSE_FUNCTION" ] || [ -e "$CONFIG/$MOUSE_FUNCTION" ]; then
+        [ -d "$GADGET/functions/$MOUSE_FUNCTION" ] && [ -L "$CONFIG/$MOUSE_FUNCTION" ] || fail "$MOUSE_FUNCTION is partial"
+        CREATE_MOUSE=0
+    fi
+    [ ! -e "$GADGET/functions/$POINTER_FUNCTION" ] || fail "$POINTER_FUNCTION already exists in a partial or foreign configuration"
+    [ ! -e "$CONFIG/$POINTER_FUNCTION" ] || fail "$POINTER_FUNCTION link already exists"
 
     ACTIVE_UDC=$(select_udc)
     OS_DESC_LINKED=0
@@ -86,7 +99,16 @@ apply_hid() {
     rollback_partial() {
         trap - EXIT HUP INT TERM
         printf '' > "$GADGET/UDC" 2>/dev/null || true
-        remove_project_functions
+        rm -f "$CONFIG/$POINTER_FUNCTION"
+        rmdir "$GADGET/functions/$POINTER_FUNCTION" 2>/dev/null || true
+        if [ "$CREATE_MOUSE" -eq 1 ]; then
+            rm -f "$CONFIG/$MOUSE_FUNCTION"
+            rmdir "$GADGET/functions/$MOUSE_FUNCTION" 2>/dev/null || true
+        fi
+        if [ "$CREATE_KEYBOARD" -eq 1 ]; then
+            rm -f "$CONFIG/$KEYBOARD_FUNCTION"
+            rmdir "$GADGET/functions/$KEYBOARD_FUNCTION" 2>/dev/null || true
+        fi
         restore_os_descriptor
         printf '%s' "$ACTIVE_UDC" > "$GADGET/UDC" 2>/dev/null || true
         [ "$APPLY_COMPLETE" -eq 1 ] || echo "Rolled back incomplete HID Gadget update." >&2
@@ -98,26 +120,37 @@ apply_hid() {
         rm "$OS_DESC_LINK"
     fi
 
-    mkdir "$GADGET/functions/$KEYBOARD_FUNCTION"
-    printf '1' > "$GADGET/functions/$KEYBOARD_FUNCTION/protocol"
-    printf '1' > "$GADGET/functions/$KEYBOARD_FUNCTION/subclass"
-    printf '8' > "$GADGET/functions/$KEYBOARD_FUNCTION/report_length"
-    cat "$SCRIPT_DIR/keyboard-report-desc.bin" > "$GADGET/functions/$KEYBOARD_FUNCTION/report_desc"
+    if [ "$CREATE_KEYBOARD" -eq 1 ]; then
+        mkdir "$GADGET/functions/$KEYBOARD_FUNCTION"
+        printf '1' > "$GADGET/functions/$KEYBOARD_FUNCTION/protocol"
+        printf '1' > "$GADGET/functions/$KEYBOARD_FUNCTION/subclass"
+        printf '8' > "$GADGET/functions/$KEYBOARD_FUNCTION/report_length"
+        cat "$SCRIPT_DIR/keyboard-report-desc.bin" > "$GADGET/functions/$KEYBOARD_FUNCTION/report_desc"
+    fi
 
-    mkdir "$GADGET/functions/$MOUSE_FUNCTION"
-    printf '2' > "$GADGET/functions/$MOUSE_FUNCTION/protocol"
-    printf '1' > "$GADGET/functions/$MOUSE_FUNCTION/subclass"
-    printf '4' > "$GADGET/functions/$MOUSE_FUNCTION/report_length"
-    cat "$SCRIPT_DIR/mouse-report-desc.bin" > "$GADGET/functions/$MOUSE_FUNCTION/report_desc"
+    if [ "$CREATE_MOUSE" -eq 1 ]; then
+        mkdir "$GADGET/functions/$MOUSE_FUNCTION"
+        printf '2' > "$GADGET/functions/$MOUSE_FUNCTION/protocol"
+        printf '1' > "$GADGET/functions/$MOUSE_FUNCTION/subclass"
+        printf '4' > "$GADGET/functions/$MOUSE_FUNCTION/report_length"
+        cat "$SCRIPT_DIR/mouse-report-desc.bin" > "$GADGET/functions/$MOUSE_FUNCTION/report_desc"
+    fi
 
-    (cd "$GADGET" && ln -s "functions/$KEYBOARD_FUNCTION" "configs/$CONFIGURATION")
-    (cd "$GADGET" && ln -s "functions/$MOUSE_FUNCTION" "configs/$CONFIGURATION")
+    mkdir "$GADGET/functions/$POINTER_FUNCTION"
+    printf '0' > "$GADGET/functions/$POINTER_FUNCTION/protocol"
+    printf '0' > "$GADGET/functions/$POINTER_FUNCTION/subclass"
+    printf '6' > "$GADGET/functions/$POINTER_FUNCTION/report_length"
+    cat "$SCRIPT_DIR/pointer-report-desc.bin" > "$GADGET/functions/$POINTER_FUNCTION/report_desc"
+
+    [ "$CREATE_KEYBOARD" -eq 0 ] || (cd "$GADGET" && ln -s "functions/$KEYBOARD_FUNCTION" "configs/$CONFIGURATION")
+    [ "$CREATE_MOUSE" -eq 0 ] || (cd "$GADGET" && ln -s "functions/$MOUSE_FUNCTION" "configs/$CONFIGURATION")
+    (cd "$GADGET" && ln -s "functions/$POINTER_FUNCTION" "configs/$CONFIGURATION")
     restore_os_descriptor
     printf '%s' "$ACTIVE_UDC" > "$GADGET/UDC"
 
     APPLY_COMPLETE=1
     trap - EXIT HUP INT TERM
-    echo "Agent IP KVM keyboard and mouse Gadget functions are active."
+    echo "Agent IP KVM keyboard, relative mouse, and absolute pointer are active."
 }
 
 remove_hid() {
@@ -140,7 +173,7 @@ remove_hid() {
 
 status_hid() {
     wait_for_gadget
-    if [ -L "$CONFIG/$KEYBOARD_FUNCTION" ] && [ -L "$CONFIG/$MOUSE_FUNCTION" ]; then
+    if [ -L "$CONFIG/$KEYBOARD_FUNCTION" ] && [ -L "$CONFIG/$MOUSE_FUNCTION" ] && [ -L "$CONFIG/$POINTER_FUNCTION" ]; then
         echo "active"
     else
         echo "inactive"

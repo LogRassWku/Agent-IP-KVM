@@ -26,6 +26,7 @@ class RecoveryBundle:
     temporary_apply_script: Path
     keyboard_descriptor: Path
     mouse_descriptor: Path
+    pointer_descriptor: Path
     instructions: Path
 
     def as_dict(self) -> dict[str, str]:
@@ -37,6 +38,7 @@ class RecoveryBundle:
             "temporary_apply_script": str(self.temporary_apply_script),
             "keyboard_descriptor": str(self.keyboard_descriptor),
             "mouse_descriptor": str(self.mouse_descriptor),
+            "pointer_descriptor": str(self.pointer_descriptor),
             "instructions": str(self.instructions),
         }
 
@@ -190,7 +192,7 @@ sudo ./rollback.sh --apply
 ```
 
 脚本只尝试删除 `{plan.gadget_name}`／`{configuration_name}` 中的
-`hid.keyboard` 和 `hid.mouse`，然后重新绑定 `{plan.udc}`。它不会删除
+`hid.keyboard`、`hid.mouse` 和 `hid.pointer`，然后重新绑定 `{plan.udc}`。它不会删除
 现有的 {", ".join(plan.existing_functions)}。
 
 如果 Gadget 名称、UDC 或现有功能已变化，不要使用旧文件包，应重新探测并生成。
@@ -235,6 +237,7 @@ esac
 [ "$(cat "$GADGET/UDC")" = "$EXPECTED_UDC" ] || {{ printf 'FAIL: UDC binding changed after plan generation\\n' >&2; exit 1; }}
 [ -s "$SCRIPT_DIR/keyboard-report-desc.bin" ] || {{ printf 'FAIL: keyboard descriptor is missing\\n' >&2; exit 1; }}
 [ -s "$SCRIPT_DIR/mouse-report-desc.bin" ] || {{ printf 'FAIL: mouse descriptor is missing\\n' >&2; exit 1; }}
+[ -s "$SCRIPT_DIR/pointer-report-desc.bin" ] || {{ printf 'FAIL: pointer descriptor is missing\\n' >&2; exit 1; }}
 if [ -r "$GADGET/os_desc/use" ] && [ "$(cat "$GADGET/os_desc/use")" = 1 ]; then
   [ -L "$OS_DESC_LINK" ] || {{ printf 'FAIL: enabled OS descriptor configuration link is missing\\n' >&2; exit 1; }}
 fi
@@ -243,7 +246,7 @@ for function_name in {existing}; do
   [ -d "$GADGET/functions/$function_name" ] || {{ printf 'FAIL: existing function %s is missing\\n' "$function_name" >&2; exit 1; }}
 done
 
-for function_name in 'hid.keyboard' 'hid.mouse'; do
+for function_name in 'hid.keyboard' 'hid.mouse' 'hid.pointer'; do
   [ ! -e "$GADGET/functions/$function_name" ] || {{ printf 'FAIL: function %s already exists\\n' "$function_name" >&2; exit 1; }}
 done
 
@@ -278,9 +281,16 @@ printf '1' > "$GADGET/functions/hid.mouse/subclass"
 printf '4' > "$GADGET/functions/hid.mouse/report_length"
 cat "$SCRIPT_DIR/mouse-report-desc.bin" > "$GADGET/functions/hid.mouse/report_desc"
 
+mkdir "$GADGET/functions/hid.pointer"
+printf '0' > "$GADGET/functions/hid.pointer/protocol"
+printf '0' > "$GADGET/functions/hid.pointer/subclass"
+printf '6' > "$GADGET/functions/hid.pointer/report_length"
+cat "$SCRIPT_DIR/pointer-report-desc.bin" > "$GADGET/functions/hid.pointer/report_desc"
+
 cd "$GADGET"
 ln -s functions/hid.keyboard "configs/$CONFIGURATION"
 ln -s functions/hid.mouse "configs/$CONFIGURATION"
+ln -s functions/hid.pointer "configs/$CONFIGURATION"
 if [ "$OS_DESC_WAS_LINKED" = true ]; then
   ln -s "configs/$CONFIGURATION" os_desc
 fi
@@ -315,6 +325,7 @@ def write_recovery_bundle(
     temporary_apply = output_directory / "temporary-apply.sh"
     keyboard_descriptor = output_directory / "keyboard-report-desc.bin"
     mouse_descriptor = output_directory / "mouse-report-desc.bin"
+    pointer_descriptor = output_directory / "pointer-report-desc.bin"
     instructions = output_directory / "LOCAL_RECOVERY.md"
 
     manifest.write_text(
@@ -338,6 +349,7 @@ def write_recovery_bundle(
     )
     keyboard_descriptor.write_bytes(plan.hid_functions[0].report_descriptor)
     mouse_descriptor.write_bytes(plan.hid_functions[1].report_descriptor)
+    pointer_descriptor.write_bytes(plan.hid_functions[2].report_descriptor)
     instructions.write_text(_instructions(plan, configuration_name), encoding="utf-8", newline="\n")
     preflight.chmod(0o755)
     rollback.chmod(0o755)
@@ -351,5 +363,6 @@ def write_recovery_bundle(
         temporary_apply,
         keyboard_descriptor,
         mouse_descriptor,
+        pointer_descriptor,
         instructions,
     )

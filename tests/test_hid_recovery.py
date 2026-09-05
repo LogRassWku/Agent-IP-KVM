@@ -53,6 +53,7 @@ class HidRecoveryBundleTests(unittest.TestCase):
             self.assertIn("--apply requires root", rollback)
             self.assertIn("hid.keyboard", rollback)
             self.assertIn("hid.mouse", rollback)
+            self.assertIn("hid.pointer", rollback)
             self.assertIn("不依赖 USB QuickLink", instructions)
             self.assertIn('MODE="${1:---dry-run}"', temporary_apply)
             self.assertIn("nohup sh -c", temporary_apply)
@@ -62,12 +63,14 @@ class HidRecoveryBundleTests(unittest.TestCase):
             )
             self.assertIn("No keyboard or mouse report was sent", temporary_apply)
             self.assertIn('ln -s functions/hid.keyboard "configs/$CONFIGURATION"', temporary_apply)
+            self.assertIn('ln -s functions/hid.pointer "configs/$CONFIGURATION"', temporary_apply)
             self.assertIn('if [ -n "$CURRENT_UDC" ]', rollback)
             self.assertIn('rm -- "$OS_DESC_LINK"', rollback)
             self.assertIn('ln -s "configs/$CONFIGURATION" os_desc', rollback)
             self.assertIn('enabled OS descriptor configuration link is missing', temporary_apply)
             self.assertEqual(bundle.keyboard_descriptor.read_bytes(), _rdk_plan().hid_functions[0].report_descriptor)
             self.assertEqual(bundle.mouse_descriptor.read_bytes(), _rdk_plan().hid_functions[1].report_descriptor)
+            self.assertEqual(bundle.pointer_descriptor.read_bytes(), _rdk_plan().hid_functions[2].report_descriptor)
 
     def test_refuses_to_overwrite_nonempty_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

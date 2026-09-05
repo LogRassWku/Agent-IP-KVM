@@ -163,23 +163,29 @@ def wait_for_hidg_path(
 
 
 class LinuxGadgetHidAdapter(HidAdapter):
-    """Write standard 8-byte keyboard and 4-byte mouse Gadget reports."""
+    """Write keyboard, relative mouse, and optional absolute pointer reports."""
 
     def __init__(
         self,
         keyboard_path: Path,
         mouse_path: Path,
         writer_factory: Callable[[Path], ReportWriter] = _FdReportWriter,
+        *,
+        pointer_path: Path | None = None,
     ) -> None:
         self._keyboard_path = Path(keyboard_path)
         self._mouse_path = Path(mouse_path)
+        self._pointer_path = Path(pointer_path) if pointer_path is not None else None
         self._writer_factory = writer_factory
         self._keyboard_writer: ReportWriter | None = None
         self._mouse_writer: ReportWriter | None = None
+        self._pointer_writer: ReportWriter | None = None
         self._state = HidState.CLOSED
         self._modifier_mask = 0
         self._pressed_keys: list[int] = []
         self._button_mask = 0
+        self._pointer_x = 16384
+        self._pointer_y = 16384
 
     @property
     def state(self) -> HidState:
@@ -231,14 +237,29 @@ class LinuxGadgetHidAdapter(HidAdapter):
             "mouse",
         )
 
+    def _write_pointer(self, wheel: int = 0) -> None:
+        report = (
+            bytes((self._button_mask,))
+            + self._pointer_x.to_bytes(2, "little")
+            + self._pointer_y.to_bytes(2, "little")
+            + bytes((wheel & 0xFF,))
+        )
+        self._write_one(self._pointer_writer, report, "absolute pointer")
+
     def arm(self) -> None:
         if self._state is HidState.READY:
             return
-        if self._keyboard_writer is None or self._mouse_writer is None:
+        if (
+            self._keyboard_writer is None
+            or self._mouse_writer is None
+            or (self._pointer_path is not None and self._pointer_writer is None)
+        ):
             self._close_writers()
             try:
                 self._keyboard_writer = self._writer_factory(self._keyboard_path)
                 self._mouse_writer = self._writer_factory(self._mouse_path)
+                if self._pointer_path is not None:
+                    self._pointer_writer = self._writer_factory(self._pointer_path)
             except OSError as exc:
                 self._close_writers()
                 self._state = HidState.ERROR
@@ -292,6 +313,22 @@ class LinuxGadgetHidAdapter(HidAdapter):
         if delta_x or delta_y or wheel:
             self._write_mouse(delta_x, delta_y, wheel)
 
+    def mouse_position(self, x: int, y: int, wheel: int = 0) -> None:
+        self._require_ready()
+        self._validate_absolute_axis(x, "x")
+        self._validate_absolute_axis(y, "y")
+        self._validate_axis(wheel, "wheel")
+        self._pointer_x = x
+        self._pointer_y = y
+        self._write_pointer(wheel)
+
+    @staticmethod
+    def _validate_absolute_axis(value: int, name: str) -> None:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+        if not 0 <= value <= 32767:
+            raise ValueError(f"{name} must be between 0 and 32767")
+
     def button_down(self, button: MouseButton) -> None:
         self._require_ready()
         if not isinstance(button, MouseButton):
@@ -300,7 +337,10 @@ class LinuxGadgetHidAdapter(HidAdapter):
         if self._button_mask & bit:
             return
         self._button_mask |= bit
-        self._write_mouse()
+        if self._pointer_writer is not None:
+            self._write_pointer()
+        else:
+            self._write_mouse()
 
     def button_up(self, button: MouseButton) -> None:
         self._require_ready()
@@ -310,7 +350,10 @@ class LinuxGadgetHidAdapter(HidAdapter):
         if not self._button_mask & bit:
             return
         self._button_mask &= ~bit
-        self._write_mouse()
+        if self._pointer_writer is not None:
+            self._write_pointer()
+        else:
+            self._write_mouse()
 
     def release_all(self) -> None:
         self._modifier_mask = 0
@@ -327,6 +370,11 @@ class LinuxGadgetHidAdapter(HidAdapter):
                 self._write_one(self._mouse_writer, bytes(4), "mouse")
             except HidError as exc:
                 errors.append(exc)
+        if self._pointer_writer is not None:
+            try:
+                self._write_pointer()
+            except HidError as exc:
+                errors.append(exc)
         if errors:
             self._state = HidState.ERROR
             details = "; ".join(str(error) for error in errors)
@@ -339,7 +387,7 @@ class LinuxGadgetHidAdapter(HidAdapter):
         self._state = HidState.STOPPED
 
     def _close_writers(self) -> None:
-        for attribute in ("_keyboard_writer", "_mouse_writer"):
+        for attribute in ("_keyboard_writer", "_mouse_writer", "_pointer_writer"):
             writer = getattr(self, attribute)
             if writer is not None:
                 try:
