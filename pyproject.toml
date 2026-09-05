@@ -12,7 +12,10 @@ license = { text = "Apache-2.0" }
 
 [project.scripts]
 agent-ip-kvm-video = "agent_ip_kvm.cli:main"
+agent-ip-kvm-web = "agent_ip_kvm.web:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+agent_ip_kvm = ["web_assets/*"]

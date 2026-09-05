@@ -55,6 +55,19 @@ PYTHONPATH=src python -m agent_ip_kvm.cli --discover-v4l2
 
 当前 RDK X5 实测能够把故障采集卡的 `/dev/video0` 识别为视频采集节点，并把 `/dev/video1` 识别为元数据节点。设备声明成功不代表能够取得真实帧。
 
+## 启动最小 Web 界面
+
+页面骨架能够显示视频源状态、固定顶部工具栏和设备信息面板：
+
+```bash
+PYTHONPATH=src python -m agent_ip_kvm.web \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --source synthetic
+```
+
+使用视频文件源时增加 `--source file --file /path/to/video.mp4`。服务默认只监听本机；在受信的管理网络上访问时，显式指定该网络接口的地址。当前页面提供状态和设备信息，连续视频画面将在下一步接入。
+
 ## 计划架构
 
 ```text
