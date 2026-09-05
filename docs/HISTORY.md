@@ -2,6 +2,12 @@
 
 本文档记录项目的重要决策、验证结果和方向变化。功能完成情况以对应需求的验收结果为准。
 
+## 2026-09-06：建立非破坏性 UEFI USB 启动测试介质
+
+- 新增 `tools/uefi-test/test.c` 和 `scripts/build-uefi-test-image.sh`，生成 x86_64 UEFI 测试镜像。
+- 镜像只显示 `Agent IP KVM USB Boot OK` 并等待按键返回，不读取或写入目标硬盘；标准启动路径为 `EFI/BOOT/BOOTX64.EFI`。
+- 已在 WSL/Ubuntu 环境完成构建和 FAT32 镜像结构验证；尚未写入开发板现有 Mass Storage，也未执行真实 USB 重绑。
+
 ## 2026-09-06：BIOS 视频输出与系统安装路径验证
 
 - 在 Lenovo 83DF 笔记本上确认 Windows 桌面可以由 UGREEN 25854 采集；目标重启并进入 BIOS 后，采集卡在 1920×1080@60 和 1280×720@60 均显示 `No Signal`。
