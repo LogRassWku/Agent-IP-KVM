@@ -89,7 +89,7 @@ class ReportWriter(Protocol):
 
 class _FdReportWriter:
     def __init__(self, path: Path) -> None:
-        flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0)
+        flags = os.O_WRONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
         self._fd = os.open(path, flags)
 
     def write(self, report: bytes) -> None:
