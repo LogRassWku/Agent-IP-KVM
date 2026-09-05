@@ -125,7 +125,7 @@ apply_hid() {
 
     rollback_partial() {
         trap - EXIT HUP INT TERM
-        printf '' > "$GADGET/UDC" 2>/dev/null || true
+        printf '\n' > "$GADGET/UDC" 2>/dev/null || true
         if [ "$CREATE_POINTER" -eq 1 ]; then
             rm -f "$CONFIG/$POINTER_FUNCTION"
             rmdir "$GADGET/functions/$POINTER_FUNCTION" 2>/dev/null || true
@@ -162,7 +162,7 @@ apply_hid() {
     }
     trap rollback_partial EXIT HUP INT TERM
 
-    printf '' > "$GADGET/UDC"
+    printf '\n' > "$GADGET/UDC"
     if [ "$OS_DESC_LINKED" -eq 1 ]; then
         rm "$OS_DESC_LINK"
     fi
@@ -230,7 +230,7 @@ remove_hid() {
     if [ -L "$OS_DESC_LINK" ]; then
         OS_DESC_LINKED=1
     fi
-    printf '' > "$GADGET/UDC"
+    printf '\n' > "$GADGET/UDC"
     if [ "$OS_DESC_LINKED" -eq 1 ]; then
         rm "$OS_DESC_LINK"
     fi

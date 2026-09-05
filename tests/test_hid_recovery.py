@@ -59,7 +59,7 @@ class HidRecoveryBundleTests(unittest.TestCase):
             self.assertIn("nohup sh -c", temporary_apply)
             self.assertLess(
                 temporary_apply.index("nohup sh -c"),
-                temporary_apply.index('printf \'\' > "$GADGET/UDC"'),
+                temporary_apply.index('printf \'\\n\' > "$GADGET/UDC"'),
             )
             self.assertIn("No keyboard or mouse report was sent", temporary_apply)
             self.assertIn('ln -s functions/hid.keyboard "configs/$CONFIGURATION"', temporary_apply)

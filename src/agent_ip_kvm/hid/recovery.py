@@ -147,7 +147,7 @@ rebind() {{
 
 trap rebind EXIT HUP INT TERM
 if [ -n "$CURRENT_UDC" ]; then
-  printf '' > "$GADGET/UDC"
+  printf '\\n' > "$GADGET/UDC"
 fi
 if [ "$OS_DESC_WAS_LINKED" = true ]; then
   rm -- "$OS_DESC_LINK"
@@ -263,7 +263,7 @@ rollback_on_exit() {{
 }}
 trap rollback_on_exit EXIT HUP INT TERM
 
-printf '' > "$GADGET/UDC"
+printf '\\n' > "$GADGET/UDC"
 OS_DESC_WAS_LINKED=false
 if [ -L "$OS_DESC_LINK" ]; then
   OS_DESC_WAS_LINKED=true
