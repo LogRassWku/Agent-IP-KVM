@@ -42,11 +42,17 @@ class Frame:
 
     @property
     def expected_size(self) -> int:
-        if self.pixel_format != "RGB24":
-            raise VideoSourceError(f"unknown frame size for {self.pixel_format}")
-        return self.width * self.height * 3
+        if self.pixel_format == "RGB24":
+            return self.width * self.height * 3
+        if self.pixel_format == "MJPEG":
+            return len(self.data)
+        raise VideoSourceError(f"unknown frame size for {self.pixel_format}")
 
     def validate(self) -> None:
+        if self.pixel_format == "MJPEG":
+            if not self.data.startswith(b"\xff\xd8") or not self.data.endswith(b"\xff\xd9"):
+                raise VideoSourceError("invalid MJPEG frame payload")
+            return
         if len(self.data) != self.expected_size:
             raise VideoSourceError(
                 f"invalid frame payload: expected {self.expected_size} bytes, "

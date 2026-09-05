@@ -10,6 +10,7 @@ from .base import (
 )
 from .file import FFmpegFileVideoSource
 from .synthetic import SyntheticVideoSource
+from .v4l2_capture import FFmpegV4L2VideoSource
 from .v4l2 import (
     DiscoveryStatus,
     V4L2DeviceInfo,
@@ -22,6 +23,7 @@ __all__ = [
     "DiscoveryStatus",
     "EndOfStream",
     "FFmpegFileVideoSource",
+    "FFmpegV4L2VideoSource",
     "Frame",
     "SourceCapability",
     "SourceHealth",

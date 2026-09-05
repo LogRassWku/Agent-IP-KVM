@@ -19,6 +19,7 @@ from . import __version__
 from .video import (
     EndOfStream,
     FFmpegFileVideoSource,
+    FFmpegV4L2VideoSource,
     Frame,
     SyntheticVideoSource,
     VideoSource,
@@ -31,6 +32,10 @@ from .video import (
 class WebConfig:
     source_kind: str = "synthetic"
     file_path: str | None = None
+    device_path: str = "/dev/video0"
+    width: int = 1920
+    height: int = 1080
+    fps: float = 30.0
 
 
 def _make_source(config: WebConfig) -> VideoSource:
@@ -38,6 +43,13 @@ def _make_source(config: WebConfig) -> VideoSource:
         if not config.file_path:
             raise ValueError("file source requires a local video path")
         return FFmpegFileVideoSource(Path(config.file_path))
+    if config.source_kind == "v4l2":
+        return FFmpegV4L2VideoSource(
+            config.device_path,
+            width=config.width,
+            height=config.height,
+            fps=config.fps,
+        )
     return SyntheticVideoSource()
 
 
@@ -197,6 +209,15 @@ class _FFmpegJPEGEncoder:
         return f"{fallback}: {detail}" if detail else fallback
 
 
+class _PassthroughJPEGEncoder:
+    def encode(self, frame: Frame) -> bytes:
+        frame.validate()
+        return frame.data
+
+    def close(self) -> None:
+        return
+
+
 class VideoStreamController:
     """Capture and encode once, then share the latest frame with all viewers."""
 
@@ -278,7 +299,10 @@ class VideoStreamController:
         try:
             source = self._source_factory(self._config)
             mode = source.open()
-            encoder = self._encoder_factory(mode.width, mode.height, mode.fps)
+            if mode.pixel_format == "MJPEG":
+                encoder = _PassthroughJPEGEncoder()
+            else:
+                encoder = self._encoder_factory(mode.width, mode.height, mode.fps)
             source.start()
             self._set_state("streaming", "视频流传输中")
             while not self._stop_event.is_set():
@@ -405,8 +429,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-ip-kvm-web")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--source", choices=("synthetic", "file"), default="synthetic")
+    parser.add_argument("--source", choices=("synthetic", "file", "v4l2"), default="synthetic")
     parser.add_argument("--file", help="local video path when --source=file")
+    parser.add_argument("--device", default="/dev/video0", help="V4L2 device when --source=v4l2")
+    parser.add_argument("--width", type=int, default=1920)
+    parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("--fps", type=float, default=30.0)
     return parser
 
 
@@ -414,7 +442,14 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.source == "file" and not args.file:
         _parser().error("--file is required when --source=file")
-    config = WebConfig(source_kind=args.source, file_path=args.file)
+    config = WebConfig(
+        source_kind=args.source,
+        file_path=args.file,
+        device_path=args.device,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+    )
     server = create_server(args.host, args.port, config)
     print(f"Agent IP KVM web interface: http://{args.host}:{args.port}")
     try:
