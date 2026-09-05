@@ -223,6 +223,7 @@ class LinuxGadgetHidAdapter(HidAdapter):
             raise HidError(f"failed to write {name} HID report: {exc}") from exc
 
     def _write_keyboard(self) -> None:
+        self._ensure_writer("_keyboard_writer", self._keyboard_path, "keyboard")
         keys = bytes(self._pressed_keys + [0] * (6 - len(self._pressed_keys)))
         self._write_one(
             self._keyboard_writer,
@@ -231,6 +232,7 @@ class LinuxGadgetHidAdapter(HidAdapter):
         )
 
     def _write_mouse(self, delta_x: int = 0, delta_y: int = 0, wheel: int = 0) -> None:
+        self._ensure_writer("_mouse_writer", self._mouse_path, "mouse")
         self._write_one(
             self._mouse_writer,
             bytes((self._button_mask, delta_x & 0xFF, delta_y & 0xFF, wheel & 0xFF)),
@@ -238,6 +240,9 @@ class LinuxGadgetHidAdapter(HidAdapter):
         )
 
     def _write_pointer(self, wheel: int = 0) -> None:
+        if self._pointer_path is None:
+            raise HidError("absolute pointer HID device is not configured")
+        self._ensure_writer("_pointer_writer", self._pointer_path, "absolute pointer")
         report = (
             bytes((self._button_mask,))
             + self._pointer_x.to_bytes(2, "little")
@@ -246,24 +251,34 @@ class LinuxGadgetHidAdapter(HidAdapter):
         )
         self._write_one(self._pointer_writer, report, "absolute pointer")
 
+    def _ensure_writer(self, attribute: str, path: Path, name: str) -> None:
+        if getattr(self, attribute) is not None:
+            return
+        try:
+            setattr(self, attribute, self._writer_factory(path))
+        except OSError as exc:
+            self._state = HidState.ERROR
+            raise HidError(f"failed to open {name} HID device") from exc
+
     def arm(self) -> None:
         if self._state is HidState.READY:
             return
-        if (
-            self._keyboard_writer is None
-            or self._mouse_writer is None
-            or (self._pointer_path is not None and self._pointer_writer is None)
-        ):
-            self._close_writers()
+        candidates = [
+            ("_keyboard_writer", self._keyboard_path),
+            ("_mouse_writer", self._mouse_path),
+        ]
+        if self._pointer_path is not None:
+            candidates.append(("_pointer_writer", self._pointer_path))
+        for attribute, path in candidates:
+            if getattr(self, attribute) is not None:
+                continue
             try:
-                self._keyboard_writer = self._writer_factory(self._keyboard_path)
-                self._mouse_writer = self._writer_factory(self._mouse_path)
-                if self._pointer_path is not None:
-                    self._pointer_writer = self._writer_factory(self._pointer_path)
-            except OSError as exc:
-                self._close_writers()
-                self._state = HidState.ERROR
-                raise HidError("failed to open Linux USB Gadget HID devices") from exc
+                setattr(self, attribute, self._writer_factory(path))
+            except OSError:
+                continue
+        if not any(getattr(self, attribute) is not None for attribute, _ in candidates):
+            self._state = HidState.ERROR
+            raise HidError("failed to open Linux USB Gadget HID devices")
         self._state = HidState.READY
         self.release_all()
 
