@@ -51,6 +51,7 @@ class AgentApiTests(unittest.TestCase):
             pc_agent_token_path=root / "token",
             pc_agent_suggestion_path=root / "suggestion.json",
             model_setup_path=root / "model-setup.json",
+            agent_sessions_path=root / "agent-sessions.json",
         )
         self.adapter = SimulatedHidAdapter()
         self.controller = HidWebController(self.adapter, backend="simulated")
@@ -133,6 +134,17 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(result["suggestion"]["objective"], "检查磁盘")
         with urlopen(self.base_url + "/api/pc-agent/status", timeout=2) as response:
             self.assertEqual(json.load(response)["status"], "available")
+
+    def test_agent_sessions_are_shared_through_board_store(self):
+        session = {"id": "shared-1", "title": "共享会话", "createdAt": 1, "updatedAt": 2, "messages": [{"role": "user", "content": "你好"}]}
+        status, saved = self.post("/api/agent/sessions", {"session": session})
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["session"]["title"], "共享会话")
+        with urlopen(self.base_url + "/api/agent/sessions", timeout=2) as response:
+            self.assertEqual(json.load(response)["sessions"][0]["id"], "shared-1")
+        request = Request(self.base_url + "/api/agent/sessions/shared-1", method="DELETE")
+        with urlopen(request, timeout=2) as response:
+            self.assertEqual(response.status, 200)
 
     def test_model_setup_task_bootstrap_launch_and_authenticated_progress(self):
         status, created = self.post(

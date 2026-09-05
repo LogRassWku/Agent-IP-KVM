@@ -47,6 +47,7 @@ let agentSessions = [];
 let activeAgentSessionId = "";
 let selectedAgentModel = "qwen2.5-1.5b";
 let modelSetupPollActive = false;
+const pendingSessionSync = new Map();
 
 const modelSetupStatusNames = {
   awaiting_start: "等待启动", starting: "正在启动", downloading_runtime: "下载运行环境",
@@ -339,10 +340,46 @@ function makeAgentSession() {
   return { id: newSessionId(), title: "新会话", createdAt: now, updatedAt: now, messages: [] };
 }
 
-function saveAgentSessions() {
+function saveAgentSessions(sync = true) {
   try {
     localStorage.setItem(agentStorageKey, JSON.stringify({ activeId: activeAgentSessionId, sessions: agentSessions }));
   } catch (_) { /* The interface remains usable if local storage is unavailable. */ }
+  if (sync) for (const session of agentSessions) queueSessionSync(session);
+}
+
+function queueSessionSync(session) {
+  if (!session?.id) return;
+  const oldTimer = pendingSessionSync.get(session.id);
+  if (oldTimer) clearTimeout(oldTimer);
+  const timer = window.setTimeout(async () => {
+    pendingSessionSync.delete(session.id);
+    try { await postJson("/api/agent/sessions", { session }); }
+    catch (_) { /* Keep the local copy and retry on the next refresh. */ }
+  }, 150);
+  pendingSessionSync.set(session.id, timer);
+}
+
+function queueSessionDelete(sessionId) {
+  window.fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => { });
+}
+
+async function syncAgentSessionsFromBoard() {
+  try {
+    const result = await fetchJson("/api/agent/sessions");
+    const remote = Array.isArray(result.sessions) ? result.sessions : [];
+    const byId = new Map(agentSessions.map((session) => [session.id, session]));
+    for (const session of remote) {
+      const local = byId.get(session.id);
+      if (!local || Number(session.updatedAt) >= Number(local.updatedAt)) byId.set(session.id, session);
+    }
+    for (const session of agentSessions) {
+      if (!remote.some((item) => item.id === session.id)) queueSessionSync(session);
+    }
+    agentSessions = [...byId.values()].filter((session) => session && typeof session.id === "string");
+    if (agentSessions.length === 0) agentSessions.push(makeAgentSession());
+    if (!agentSessions.some((session) => session.id === activeAgentSessionId)) activeAgentSessionId = agentSessions[0].id;
+    saveAgentSessions(false); renderAgentSessions(); renderAgentConversation();
+  } catch (_) { /* The browser cache remains usable during a board reconnect. */ }
 }
 
 function loadAgentSessions() {
@@ -645,6 +682,7 @@ function deleteAgentSession(sessionId) {
   agentSessions = agentSessions.filter((item) => item.id !== sessionId);
   if (agentSessions.length === 0) agentSessions.push(makeAgentSession());
   if (activeAgentSessionId === sessionId) activeAgentSessionId = [...agentSessions].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+  queueSessionDelete(sessionId);
   saveAgentSessions();
   renderAgentSessions();
   renderAgentConversation();
@@ -1087,5 +1125,5 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-loadAgentSessions(); loadAgentModel(); renderAgentSessions(); renderAgentConversation(); pollModelSetupTasks();
-setZoom(100); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000);
+loadAgentSessions(); loadAgentModel(); renderAgentSessions(); renderAgentConversation(); pollModelSetupTasks(); syncAgentSessionsFromBoard();
+setZoom(100); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000); setInterval(syncAgentSessionsFromBoard, 5000);
