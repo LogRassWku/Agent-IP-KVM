@@ -52,7 +52,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$PROJECT_DIR
 Environment=PYTHONPATH=$PROJECT_DIR/src
-ExecStart=$PYTHON3 -m agent_ip_kvm.web --host 0.0.0.0 --port 8765 --source v4l2 --device /dev/video0 --width 1920 --height 1080 --fps 30
+ExecStart=$PYTHON3 -m agent_ip_kvm.web --host 0.0.0.0 --port 8765 --source v4l2 --device /dev/video0 --width 1920 --height 1080 --fps 30 --enable-hid --hid-backend auto
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=10
