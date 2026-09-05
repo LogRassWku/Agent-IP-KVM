@@ -32,7 +32,7 @@ button { color: inherit; font: inherit; }
   border-bottom: 1px solid var(--line);
   background: rgba(13, 17, 25, 0.96);
   backdrop-filter: blur(16px);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .tools, .tool-menu, .tool-button, .section-title-row, .no-signal { display: flex; align-items: center; }
@@ -127,10 +127,6 @@ body.agent-mode .agent-topbar-title { opacity: 1; visibility: visible; transform
   background: #0b1018;
   font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
 }
-.mouse-menu { width: 220px; }
-.mouse-menu select { margin-bottom: 12px; }
-.mouse-message { min-height: 17px; margin: 0 0 9px; color: var(--muted); font-size: 11px; }
-.control-hint { margin: 9px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .zoom-buttons {
   position: absolute;
   z-index: 4;
@@ -411,9 +407,7 @@ body.agent-mode .agent-shell { transform: translateX(0); }
   box-shadow: 0 0 0 4px rgba(255, 107, 120, 0.12);
 }
 
-.video-shell.cursor-small { cursor: url("/cursor-small.svg") 1 1, auto; }
-.video-shell.cursor-medium { cursor: url("/cursor-medium.svg") 2 2, auto; }
-.video-shell.cursor-large { cursor: url("/cursor-large.svg") 3 3, auto; }
+.video-shell { cursor: none; }
 
 .onscreen-keyboard {
   position: fixed;
@@ -431,22 +425,6 @@ body.agent-mode .agent-shell { transform: translateX(0); }
   backdrop-filter: blur(18px);
 }
 .onscreen-keyboard[hidden] { display: none; }
-.keyboard-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
-.keyboard-heading > div:first-child { display: grid; gap: 3px; }
-.keyboard-heading strong { font-size: 13px; }
-.keyboard-heading span { color: var(--muted); font-size: 11px; }
-.keyboard-actions { display: flex; align-items: center; gap: 7px; }
-.keyboard-actions > button:first-child {
-  min-height: 32px;
-  padding: 0 11px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: #dfe5ec;
-  background: #171e2b;
-  cursor: pointer;
-  font-size: 11px;
-}
-.keyboard-actions button:disabled { opacity: .45; cursor: default; }
 .keyboard-rows { display: grid; gap: 6px; min-width: 720px; }
 .keyboard-row { display: flex; justify-content: center; gap: 5px; }
 .keyboard-key {
@@ -464,11 +442,13 @@ body.agent-mode .agent-shell { transform: translateX(0); }
   touch-action: manipulation;
 }
 .keyboard-key:hover, .keyboard-key:focus-visible { border-color: rgba(105,224,163,.65); outline: none; }
-.keyboard-key:active, .keyboard-key.active { color: #07120d; border-color: var(--accent); background: var(--accent); }
+.keyboard-key:active, .keyboard-key.active, .keyboard-key.queued { color: #07120d; border-color: var(--accent); background: var(--accent); }
 .keyboard-key:disabled { opacity: .38; cursor: default; }
 .keyboard-key.wide { flex-grow: 1.45; max-width: 92px; }
 .keyboard-key.extra-wide { flex-grow: 1.8; max-width: 116px; }
 .keyboard-key.space-key { flex-grow: 6; max-width: 390px; }
+.keyboard-key.sticky-key { flex-grow: 1.25; max-width: 84px; font-weight: 650; }
+.keyboard-key.keyboard-close-key { color: #ff9da4; font-size: 17px; }
 .compact-row .keyboard-key { height: 32px; font-size: 10px; }
 
 .panel-backdrop { position: fixed; inset: var(--topbar-height) 0 0; z-index: 29; background: rgba(0, 0, 0, 0.38); }

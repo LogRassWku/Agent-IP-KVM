@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <title>Agent IP KVM</title>
-    <link rel="stylesheet" href="/styles.css?v=20260906-4">
+    <link rel="stylesheet" href="/styles.css?v=20260906-6">
   </head>
   <body>
     <header class="topbar" id="topbar">
@@ -22,22 +22,6 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 9m0 0V4m0 5h5M4 13a8.1 8.1 0 0 0 14.9 4L21 15m0 0v5m0-5h-5"/></svg>
           <span>刷新</span>
         </button>
-        <div class="tool-menu" id="mouse-tool-menu">
-          <button class="tool-button" id="mouse-button" type="button" title="鼠标设置" aria-expanded="false" aria-controls="mouse-menu">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 2.5V9M9 9h6"/></svg>
-            <span>鼠标</span>
-          </button>
-          <section class="popover-menu mouse-menu" id="mouse-menu" aria-label="鼠标设置" hidden>
-            <label for="cursor-size-select">画面内光标大小</label>
-            <select id="cursor-size-select">
-              <option value="small">小</option>
-              <option value="medium" selected>中</option>
-              <option value="large">大</option>
-            </select>
-            <p class="mouse-message" id="mouse-message" role="status" aria-live="polite">正在读取 HID 状态</p>
-            <p class="control-hint">鼠标移入视频画面后，位置、点击和滚轮会自动同步到目标电脑。</p>
-          </section>
-        </div>
         <button class="tool-button" id="keyboard-button" type="button" title="屏幕键盘" aria-expanded="false" aria-controls="onscreen-keyboard">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M6.5 9h.01M10.2 9h.01M13.8 9h.01M17.5 9h.01M6.5 12h.01M10.2 12h.01M13.8 12h.01M17.5 12h.01M7 15.5h10"/></svg>
           <span>键盘</span>
@@ -126,23 +110,13 @@
     </main>
 
     <section class="onscreen-keyboard" id="onscreen-keyboard" aria-label="屏幕键盘" hidden>
-      <div class="keyboard-heading">
-        <div>
-          <strong>屏幕键盘</strong>
-          <span id="hid-message" role="status" aria-live="polite">正在读取 HID 状态</span>
-        </div>
-        <div class="keyboard-actions">
-          <button id="release-keys" type="button">释放全部</button>
-          <button class="icon-button" id="close-keyboard" type="button" title="关闭屏幕键盘" aria-label="关闭屏幕键盘">×</button>
-        </div>
-      </div>
       <div class="keyboard-rows" id="keyboard-rows">
         <div class="keyboard-row compact-row">
           <button class="keyboard-key" data-key="escape">Esc</button>
           <button class="keyboard-key" data-key="f1">F1</button><button class="keyboard-key" data-key="f2">F2</button><button class="keyboard-key" data-key="f3">F3</button><button class="keyboard-key" data-key="f4">F4</button>
           <button class="keyboard-key" data-key="f5">F5</button><button class="keyboard-key" data-key="f6">F6</button><button class="keyboard-key" data-key="f7">F7</button><button class="keyboard-key" data-key="f8">F8</button>
           <button class="keyboard-key" data-key="f9">F9</button><button class="keyboard-key" data-key="f10">F10</button><button class="keyboard-key" data-key="f11">F11</button><button class="keyboard-key" data-key="f12">F12</button>
-          <button class="keyboard-key" data-key="delete">Del</button>
+          <button class="keyboard-key" data-key="delete">Del</button><button class="keyboard-key keyboard-close-key" id="close-keyboard" type="button" title="关闭屏幕键盘" aria-label="关闭屏幕键盘">×</button>
         </div>
         <div class="keyboard-row">
           <button class="keyboard-key" data-key="`">`</button><button class="keyboard-key" data-key="1">1</button><button class="keyboard-key" data-key="2">2</button><button class="keyboard-key" data-key="3">3</button><button class="keyboard-key" data-key="4">4</button><button class="keyboard-key" data-key="5">5</button><button class="keyboard-key" data-key="6">6</button><button class="keyboard-key" data-key="7">7</button><button class="keyboard-key" data-key="8">8</button><button class="keyboard-key" data-key="9">9</button><button class="keyboard-key" data-key="0">0</button><button class="keyboard-key" data-key="-">−</button><button class="keyboard-key" data-key="=">=</button><button class="keyboard-key wide" data-key="backspace">Backspace</button>
@@ -157,7 +131,7 @@
           <button class="keyboard-key modifier extra-wide" data-modifier="shift">Shift</button><button class="keyboard-key" data-key="z">Z</button><button class="keyboard-key" data-key="x">X</button><button class="keyboard-key" data-key="c">C</button><button class="keyboard-key" data-key="v">V</button><button class="keyboard-key" data-key="b">B</button><button class="keyboard-key" data-key="n">N</button><button class="keyboard-key" data-key="m">M</button><button class="keyboard-key" data-key=",">,</button><button class="keyboard-key" data-key=".">.</button><button class="keyboard-key" data-key="/">/</button><button class="keyboard-key modifier extra-wide" data-modifier="shift">Shift</button>
         </div>
         <div class="keyboard-row bottom-row">
-          <button class="keyboard-key modifier" data-modifier="ctrl">Ctrl</button><button class="keyboard-key modifier" data-modifier="win">Win</button><button class="keyboard-key modifier" data-modifier="alt">Alt</button><button class="keyboard-key space-key" data-key="space">Space</button><button class="keyboard-key" data-key="left">←</button><button class="keyboard-key" data-key="up">↑</button><button class="keyboard-key" data-key="down">↓</button><button class="keyboard-key" data-key="right">→</button>
+          <button class="keyboard-key sticky-key" id="sticky-keys" type="button" aria-pressed="false" title="选择多个按键后再次点击发送">粘滞</button><button class="keyboard-key modifier" data-modifier="ctrl">Ctrl</button><button class="keyboard-key modifier" data-modifier="win">Win</button><button class="keyboard-key modifier" data-modifier="alt">Alt</button><button class="keyboard-key space-key" data-key="space">Space</button><button class="keyboard-key" data-key="left">←</button><button class="keyboard-key" data-key="up">↑</button><button class="keyboard-key" data-key="down">↓</button><button class="keyboard-key" data-key="right">→</button>
         </div>
       </div>
     </section>
@@ -195,6 +169,6 @@
       </section>
     </aside>
 
-    <script src="/app.js?v=20260906-5"></script>
+    <script src="/app.js?v=20260906-6"></script>
   </body>
 </html>

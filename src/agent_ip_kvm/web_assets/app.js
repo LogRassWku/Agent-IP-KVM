@@ -7,12 +7,10 @@ const elements = {
   resolutionSelect: document.querySelector("#resolution-select"), refreshRateSelect: document.querySelector("#refresh-rate-select"),
   screenMessage: document.querySelector("#screen-message"), applyScreenSettings: document.querySelector("#apply-screen-settings"),
   zoomOut: document.querySelector("#zoom-out"), zoomIn: document.querySelector("#zoom-in"),
-  mouseButton: document.querySelector("#mouse-button"), mouseMenu: document.querySelector("#mouse-menu"),
-  mouseMessage: document.querySelector("#mouse-message"),
-  cursorSizeSelect: document.querySelector("#cursor-size-select"), keyboardButton: document.querySelector("#keyboard-button"),
+  keyboardButton: document.querySelector("#keyboard-button"),
   keyboard: document.querySelector("#onscreen-keyboard"), closeKeyboard: document.querySelector("#close-keyboard"),
-  keyboardRows: document.querySelector("#keyboard-rows"), hidMessage: document.querySelector("#hid-message"),
-  releaseKeys: document.querySelector("#release-keys"), v4l2Message: document.querySelector("#v4l2-message"),
+  keyboardRows: document.querySelector("#keyboard-rows"), stickyKeys: document.querySelector("#sticky-keys"),
+  v4l2Message: document.querySelector("#v4l2-message"),
   deviceCount: document.querySelector("#device-count"), deviceList: document.querySelector("#device-list"),
   agentModeButton: document.querySelector("#agent-mode-button"), agentShell: document.querySelector("#agent-shell"),
   agentComposer: document.querySelector("#agent-composer"), agentInput: document.querySelector("#agent-input"),
@@ -29,6 +27,8 @@ let videoModes = [];
 let hidEnabled = false;
 let zoomPercent = 100;
 const activeModifiers = new Set();
+const queuedStickyKeys = new Set();
+let stickyKeysEnabled = false;
 let videoWidth = 16;
 let videoHeight = 9;
 let pendingPointer = null;
@@ -109,17 +109,21 @@ function clearModifiers() {
   }
 }
 
+function resetStickyKeys() {
+  stickyKeysEnabled = false;
+  queuedStickyKeys.clear();
+  elements.stickyKeys.classList.remove("active");
+  elements.stickyKeys.setAttribute("aria-pressed", "false");
+  elements.stickyKeys.title = "选择多个按键后再次点击发送";
+  for (const button of elements.keyboardRows.querySelectorAll("[data-key]")) button.classList.remove("queued");
+  clearModifiers();
+}
+
 function updateHidStatus(hid) {
   hidEnabled = Boolean(hid?.enabled && hid?.state !== "stopped" && hid?.state !== "error");
-  const disconnected = hid?.backend === "linux-auto";
-  const statusText = hidEnabled ? (hid.backend === "simulated" ? "HID 模拟模式" : "HID 已连接")
-    : (disconnected ? "HID 未连接" : "HID 尚未启用");
-  elements.hidMessage.textContent = statusText;
-  elements.mouseMessage.textContent = hidEnabled ? "HID 已连接 · 鼠标位置自动同步" : statusText;
-  elements.releaseKeys.disabled = !hidEnabled;
   for (const key of elements.keyboardRows.querySelectorAll("button")) key.disabled = !hidEnabled;
   if (!hidEnabled) {
-    clearModifiers();
+    resetStickyKeys();
     pendingPointer = null;
     pendingWheel = 0;
   }
@@ -184,15 +188,11 @@ function setPanel(open) {
 }
 function setScreenMenu(open) {
   elements.screenMenu.hidden = !open; elements.screenButton.setAttribute("aria-expanded", String(open));
-  if (open) { setMouseMenu(false); setPanel(false); }
-}
-function setMouseMenu(open) {
-  elements.mouseMenu.hidden = !open; elements.mouseButton.setAttribute("aria-expanded", String(open));
-  if (open) { setScreenMenu(false); setPanel(false); }
+  if (open) { setKeyboard(false); setPanel(false); }
 }
 function setKeyboard(open) {
   elements.keyboard.hidden = !open; elements.keyboardButton.setAttribute("aria-expanded", String(open));
-  if (open) { setScreenMenu(false); setMouseMenu(false); setPanel(false); } else clearModifiers();
+  if (open) { setScreenMenu(false); setPanel(false); } else resetStickyKeys();
 }
 
 function setAgentMode(open) {
@@ -215,7 +215,6 @@ function setAgentMode(open) {
     });
     setPanel(false);
     setScreenMenu(false);
-    setMouseMenu(false);
     setKeyboard(false);
     elements.agentInput.focus({ preventScroll: true });
   } else {
@@ -413,17 +412,40 @@ function setZoom(value) {
   elements.zoomOut.title = `缩小画面（当前 ${zoomPercent}%）`;
   elements.zoomIn.title = `放大画面（当前 ${zoomPercent}%）`;
 }
-function setCursorSize(size) {
-  const selected = ["small", "medium", "large"].includes(size) ? size : "medium";
-  elements.cursorSizeSelect.value = selected;
-  elements.videoShell.classList.remove("cursor-small", "cursor-medium", "cursor-large");
-  elements.videoShell.classList.add(`cursor-${selected}`);
-}
 function toggleModifier(name) {
   if (activeModifiers.has(name)) activeModifiers.delete(name); else activeModifiers.add(name);
   for (const button of elements.keyboardRows.querySelectorAll(`[data-modifier="${name}"]`)) {
     const active = activeModifiers.has(name); button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
+  }
+}
+
+function queueStickyKey(button) {
+  const key = button.dataset.key;
+  if (queuedStickyKeys.has(key)) queuedStickyKeys.delete(key); else queuedStickyKeys.add(key);
+  button.classList.toggle("queued", queuedStickyKeys.has(key));
+  elements.stickyKeys.title = `已选择 ${queuedStickyKeys.size} 个按键；再次点击发送`;
+}
+
+async function toggleStickyKeys() {
+  if (!stickyKeysEnabled) {
+    stickyKeysEnabled = true;
+    elements.stickyKeys.classList.add("active");
+    elements.stickyKeys.setAttribute("aria-pressed", "true");
+    elements.stickyKeys.title = "选择按键；再次点击粘滞键发送";
+    return;
+  }
+  const keys = [...queuedStickyKeys];
+  const modifiers = [...activeModifiers];
+  elements.stickyKeys.disabled = true;
+  try {
+    for (const key of keys) await postJson("/api/hid/key", { key, modifiers });
+  } catch (error) {
+    console.warn("Unable to send sticky keys", error);
+    await refreshStatus();
+  } finally {
+    resetStickyKeys();
+    elements.stickyKeys.disabled = !hidEnabled;
   }
 }
 
@@ -477,7 +499,7 @@ async function flushPointerPosition() {
   try {
     await postJson("/api/hid/mouse-position", { x: pointer.x, y: pointer.y, wheel });
   } catch (error) {
-    elements.mouseMessage.textContent = error.message;
+    console.warn("Unable to move HID pointer", error);
     await refreshStatus();
   } finally {
     pointerRequestActive = false;
@@ -490,31 +512,28 @@ async function clickMouse(buttonNumber, pointer) {
   const button = names[buttonNumber];
   if (!button || !hidEnabled) return;
   try { await postJson("/api/hid/mouse-click", { button, x: pointer.x, y: pointer.y }); }
-  catch (error) { elements.mouseMessage.textContent = error.message; await refreshStatus(); }
+  catch (error) { console.warn("Unable to click HID pointer", error); await refreshStatus(); }
 }
 async function tapKey(button) {
   if (!hidEnabled) return;
   button.disabled = true;
   try {
     await postJson("/api/hid/key", { key: button.dataset.key, modifiers: [...activeModifiers] });
-    elements.hidMessage.textContent = `已发送 ${button.textContent.trim()}`;
-  } catch (error) { elements.hidMessage.textContent = error.message; await refreshStatus(); }
+  } catch (error) { console.warn("Unable to send HID key", error); await refreshStatus(); }
   finally { button.disabled = !hidEnabled; clearModifiers(); }
 }
 
-elements.settingsButton.addEventListener("click", () => { setScreenMenu(false); setMouseMenu(false); setKeyboard(false); setPanel(true); });
+elements.settingsButton.addEventListener("click", () => { setScreenMenu(false); setKeyboard(false); setPanel(true); });
 elements.closeSettings.addEventListener("click", () => setPanel(false));
 elements.backdrop.addEventListener("click", () => setPanel(false));
 elements.refreshButton.addEventListener("click", () => { connectStream(); refreshStatus(); });
 elements.videoFrame.addEventListener("load", () => { elements.videoFrame.classList.add("visible"); elements.noSignal.hidden = true; });
 elements.videoFrame.addEventListener("error", () => { elements.videoFrame.classList.remove("visible"); elements.noSignal.hidden = false; refreshStatus(); });
 elements.screenButton.addEventListener("click", () => setScreenMenu(elements.screenMenu.hidden));
-elements.mouseButton.addEventListener("click", () => setMouseMenu(elements.mouseMenu.hidden));
 elements.keyboardButton.addEventListener("click", () => setKeyboard(elements.keyboard.hidden));
 elements.closeKeyboard.addEventListener("click", () => setKeyboard(false));
 elements.zoomOut.addEventListener("click", () => setZoom(zoomPercent - 10));
 elements.zoomIn.addEventListener("click", () => setZoom(zoomPercent + 10));
-elements.cursorSizeSelect.addEventListener("change", () => setCursorSize(elements.cursorSizeSelect.value));
 document.addEventListener("mousemove", (event) => {
   if (agentMode || !hidEnabled || !elements.videoShell.contains(event.target)) return;
   const pointer = pointerFromEvent(event);
@@ -576,11 +595,10 @@ elements.agentModelMenu.addEventListener("click", (event) => {
 elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {
   const button = event.target.closest("button"); if (!button || button.disabled) return;
-  if (button.dataset.modifier) toggleModifier(button.dataset.modifier); else if (button.dataset.key) tapKey(button);
-});
-elements.releaseKeys.addEventListener("click", async () => {
-  try { await postJson("/api/hid/release", {}); elements.hidMessage.textContent = "已释放全部按键"; }
-  catch (error) { elements.hidMessage.textContent = error.message; } finally { clearModifiers(); }
+  if (button === elements.stickyKeys) toggleStickyKeys();
+  else if (button.dataset.modifier) toggleModifier(button.dataset.modifier);
+  else if (button.dataset.key && stickyKeysEnabled) queueStickyKey(button);
+  else if (button.dataset.key) tapKey(button);
 });
 elements.applyScreenSettings.addEventListener("click", async () => {
   const [width, height] = elements.resolutionSelect.value.split("x").map(Number); const fps = Number(elements.refreshRateSelect.value);
@@ -590,7 +608,6 @@ elements.applyScreenSettings.addEventListener("click", async () => {
   finally { elements.applyScreenSettings.disabled = videoModes.length === 0; }
 });
 document.addEventListener("click", (event) => {
-  if (!event.target.closest("#mouse-tool-menu") && !event.target.closest("#mouse-button")) setMouseMenu(false);
   if (!event.target.closest("#screen-menu") && !event.target.closest("#screen-button")) setScreenMenu(false);
   if (!event.target.closest("#agent-model-picker")) setAgentModelMenu(false);
   if (elements.agentApp.classList.contains("sidebar-open") && !event.target.closest("#agent-sidebar") && !event.target.closest("#agent-sidebar-toggle")) {
@@ -601,9 +618,9 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (agentMode) setAgentMode(false);
-    else { setPanel(false); setScreenMenu(false); setMouseMenu(false); setKeyboard(false); }
+    else { setPanel(false); setScreenMenu(false); setKeyboard(false); }
   }
 });
 
 loadAgentSessions(); loadAgentModel(); renderAgentSessions(); renderAgentConversation();
-setZoom(100); setCursorSize("medium"); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000);
+setZoom(100); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000);
