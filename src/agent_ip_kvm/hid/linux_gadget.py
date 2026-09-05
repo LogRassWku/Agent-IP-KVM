@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 import time
@@ -80,6 +81,9 @@ BUTTON_BITS = {
     MouseButton.FORWARD: 0x10,
 }
 
+REPORT_WRITE_TIMEOUT_SECONDS = 0.35
+REPORT_WRITE_RETRY_SECONDS = 0.005
+
 
 class ReportWriter(Protocol):
     def write(self, report: bytes) -> None: ...
@@ -94,8 +98,17 @@ class _FdReportWriter:
 
     def write(self, report: bytes) -> None:
         remaining = memoryview(report)
+        deadline = time.monotonic() + REPORT_WRITE_TIMEOUT_SECONDS
         while remaining:
-            written = os.write(self._fd, remaining)
+            try:
+                written = os.write(self._fd, remaining)
+            except OSError as exc:
+                if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(REPORT_WRITE_RETRY_SECONDS)
+                continue
             if written <= 0:
                 raise OSError("HID report write returned no progress")
             remaining = remaining[written:]
@@ -186,6 +199,7 @@ class LinuxGadgetHidAdapter(HidAdapter):
         self._button_mask = 0
         self._pointer_x = 16384
         self._pointer_y = 16384
+        self._pointer_position_known = False
 
     @property
     def state(self) -> HidState:
@@ -336,6 +350,7 @@ class LinuxGadgetHidAdapter(HidAdapter):
         self._validate_axis(wheel, "wheel")
         self._pointer_x = x
         self._pointer_y = y
+        self._pointer_position_known = True
         self._write_pointer(wheel)
 
     @staticmethod
@@ -356,6 +371,8 @@ class LinuxGadgetHidAdapter(HidAdapter):
         if self._mouse_writer is not None:
             self._write_mouse()
         else:
+            if not self._pointer_position_known:
+                raise HidError("set absolute pointer position before pressing a button")
             self._write_pointer()
 
     def button_up(self, button: MouseButton) -> None:
@@ -369,6 +386,8 @@ class LinuxGadgetHidAdapter(HidAdapter):
         if self._mouse_writer is not None:
             self._write_mouse()
         else:
+            if not self._pointer_position_known:
+                raise HidError("set absolute pointer position before releasing a button")
             self._write_pointer()
 
     def release_all(self) -> None:
@@ -386,7 +405,11 @@ class LinuxGadgetHidAdapter(HidAdapter):
                 self._write_one(self._mouse_writer, bytes(4), "mouse")
             except HidError as exc:
                 errors.append(exc)
-        if self._pointer_writer is not None and self._mouse_writer is None:
+        if (
+            self._pointer_writer is not None
+            and self._mouse_writer is None
+            and self._pointer_position_known
+        ):
             try:
                 self._write_pointer()
             except HidError as exc:

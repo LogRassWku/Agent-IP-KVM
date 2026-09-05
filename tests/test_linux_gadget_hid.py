@@ -1,5 +1,7 @@
+import errno
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from agent_ip_kvm.hid import (
     HidError,
@@ -9,6 +11,7 @@ from agent_ip_kvm.hid import (
     MouseButton,
 )
 from agent_ip_kvm.hid_output_cli import main
+from agent_ip_kvm.hid.linux_gadget import _FdReportWriter
 
 
 class FakeWriter:
@@ -101,6 +104,40 @@ class LinuxGadgetHidAdapterTests(unittest.TestCase):
         with self.assertRaises(HidError):
             adapter.arm()
         self.assertEqual(adapter.state, HidState.ERROR)
+
+    def test_pointer_only_adapter_does_not_jump_to_center_when_armed(self) -> None:
+        adapter = LinuxGadgetHidAdapter(
+            self.keyboard,
+            None,
+            writer_factory=self.factory,
+            pointer_path=self.pointer,
+        )
+
+        adapter.arm()
+        self.assertEqual(self.factory.writers[self.pointer].reports, [])
+
+        adapter.mouse_position(12000, 8000)
+        adapter.button_down(MouseButton.LEFT)
+        adapter.button_up(MouseButton.LEFT)
+
+        pointer_reports = self.factory.writers[self.pointer].reports
+        self.assertEqual(pointer_reports[0], bytes((0, 224, 46, 64, 31, 0)))
+        self.assertEqual(pointer_reports[1][0], 1)
+        self.assertEqual(pointer_reports[2][0], 0)
+
+    def test_fd_writer_retries_temporary_busy_endpoint(self) -> None:
+        writer = _FdReportWriter.__new__(_FdReportWriter)
+        writer._fd = 7
+        busy = BlockingIOError(errno.EAGAIN, "temporarily unavailable")
+
+        with patch(
+            "agent_ip_kvm.hid.linux_gadget.os.write",
+            side_effect=(busy, 4),
+        ) as write, patch("agent_ip_kvm.hid.linux_gadget.time.sleep") as sleep:
+            writer.write(bytes((0, 1, 2, 3)))
+
+        self.assertEqual(write.call_count, 2)
+        sleep.assert_called_once()
 
 
 class HidOutputCliTests(unittest.TestCase):
