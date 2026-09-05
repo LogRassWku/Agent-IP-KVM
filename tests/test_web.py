@@ -77,6 +77,8 @@ class WebInterfaceTests(unittest.TestCase):
             page = response.read().decode("utf-8")
             self.assertEqual(response.status, 200)
             self.assertIn("Agent IP KVM", page)
+            self.assertNotIn('class="brand"', page)
+            self.assertNotIn('class="brand-name"', page)
             self.assertIn('id="settings-panel"', page)
             self.assertIn('id="video-frame"', page)
             self.assertIn("No Signal", page)
