@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <title>Agent IP KVM</title>
-    <link rel="stylesheet" href="/styles.css?v=20260906-13">
+    <link rel="stylesheet" href="/styles.css?v=20260906-14">
   </head>
   <body>
     <header class="topbar" id="topbar">
@@ -58,15 +58,23 @@
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>
                 </button>
                 <section class="model-menu" id="agent-model-menu" aria-label="选择 Agent 模型" hidden>
-                  <button type="button" data-model-option="qwen2.5-1.5b">
-                    <span><strong>Qwen2.5 1.5B</strong><small>板载轻量模型</small></span><i aria-hidden="true">✓</i>
-                  </button>
-                  <button type="button" data-model-option="pc-agent">
-                    <span><strong>PC Agent</strong><small>使用被控电脑上的模型</small></span><i aria-hidden="true">✓</i>
-                  </button>
-                  <button type="button" data-model-option="remote-api">
-                    <span><strong>远程 API</strong><small>连接外部模型服务</small></span><i aria-hidden="true">✓</i>
-                  </button>
+                  <div class="model-option-row">
+                    <button type="button" data-model-option="qwen2.5-1.5b">
+                      <span><strong>Qwen2.5 1.5B</strong><small>板载轻量模型</small></span><i aria-hidden="true">✓</i>
+                    </button>
+                  </div>
+                  <div class="model-option-row">
+                    <button type="button" data-model-option="pc-agent">
+                      <span><strong>PC Agent</strong><small>使用被控电脑上的模型</small></span><i aria-hidden="true">✓</i>
+                    </button>
+                    <button class="model-config-button" type="button" data-config-model="pc-agent">配置</button>
+                  </div>
+                  <div class="model-option-row">
+                    <button type="button" data-model-option="remote-api">
+                      <span><strong>远程 API</strong><small>连接外部模型服务</small></span><i aria-hidden="true">✓</i>
+                    </button>
+                    <button class="model-config-button" type="button" data-config-model="remote-api" disabled title="后续接入">配置</button>
+                  </div>
                 </section>
               </div>
               <button class="new-chat-button" id="new-agent-chat" type="button">
@@ -191,6 +199,6 @@
       </section>
     </aside>
 
-    <script src="/app.js?v=20260906-13"></script>
+    <script src="/app.js?v=20260906-14"></script>
   </body>
 </html>

@@ -50,6 +50,7 @@ class AgentApiTests(unittest.TestCase):
             audit_path=root / "audit.jsonl",
             pc_agent_token_path=root / "token",
             pc_agent_suggestion_path=root / "suggestion.json",
+            model_setup_path=root / "model-setup.json",
         )
         self.adapter = SimulatedHidAdapter()
         self.controller = HidWebController(self.adapter, backend="simulated")
@@ -82,7 +83,7 @@ class AgentApiTests(unittest.TestCase):
             headers=headers,
             method="POST",
         )
-        with urlopen(request, timeout=2) as response:
+        with urlopen(request, timeout=5) as response:
             return response.status, json.load(response)
 
     def test_full_plan_approval_execution_and_audit_loop(self):
@@ -120,6 +121,37 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(result["suggestion"]["objective"], "检查磁盘")
         with urlopen(self.base_url + "/api/pc-agent/status", timeout=2) as response:
             self.assertEqual(json.load(response)["status"], "available")
+
+    def test_model_setup_task_bootstrap_launch_and_authenticated_progress(self):
+        status, created = self.post(
+            "/api/model-setup/tasks",
+            {
+                "model": "qwen3.5:9b",
+                "install_dir": "D:\\AgentIPKVM\\Ollama",
+                "models_dir": "D:\\AgentIPKVM\\Models",
+            },
+        )
+        self.assertEqual(status, 200)
+        task_id = created["task"]["task_id"]
+        self.assertNotIn("secret", created["task"])
+
+        _, launched = self.post("/api/model-setup/launch", {"task_id": task_id})
+        self.assertEqual(launched["task"]["status"], "starting")
+        with urlopen(self.base_url + f"/api/model-setup/tasks/{task_id}", timeout=2) as response:
+            self.assertEqual(json.load(response)["task"]["model"], "qwen3.5:9b")
+
+        with self.assertRaises(HTTPError) as caught:
+            self.post(
+                "/api/model-setup/progress",
+                {"task_id": task_id, "status": "completed", "progress": 100, "message": "done"},
+            )
+        self.assertEqual(caught.exception.code, 401)
+        _, completed = self.post(
+            "/api/model-setup/progress",
+            {"task_id": task_id, "status": "completed", "progress": 100, "message": "done"},
+            self.token,
+        )
+        self.assertEqual(completed["task"]["status"], "completed")
 
 
 if __name__ == "__main__":

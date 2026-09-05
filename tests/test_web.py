@@ -173,6 +173,20 @@ class WebInterfaceTests(unittest.TestCase):
         )
         self.assertEqual(adapter.pressed_keys, frozenset())
 
+    def test_hid_controller_types_bounded_ascii_command(self) -> None:
+        adapter = SimulatedHidAdapter()
+        controller = HidWebController(adapter, backend="simulated")
+
+        command = "PowerShell -c \"irm 'http://127.0.0.1/a.ps1'\""
+        result = controller.type_text(command, key_delay=0)
+
+        self.assertEqual(result["characters"], len(command))
+        self.assertEqual(adapter.pressed_keys, frozenset())
+        self.assertGreater(len(adapter.events), 47 * 2)
+
+        with self.assertRaisesRegex(ValueError, "unsupported character"):
+            controller.type_text("包含中文", key_delay=0)
+
     def test_hid_controller_rejects_unknown_keys_before_output(self) -> None:
         adapter = SimulatedHidAdapter()
         controller = HidWebController(adapter, backend="simulated")

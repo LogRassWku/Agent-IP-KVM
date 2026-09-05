@@ -20,4 +20,4 @@ agent-ip-kvm-hid-output = "agent_ip_kvm.hid_output_cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_ip_kvm = ["web_assets/*"]
+agent_ip_kvm = ["web_assets/*", "*.ps1"]

@@ -61,7 +61,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$PROJECT_DIR
 Environment=PYTHONPATH=$PROJECT_DIR/src
-ExecStart=$PYTHON3 -m agent_ip_kvm.web --host 0.0.0.0 --port 8765 --source v4l2 --device /dev/video0 --width 1920 --height 1080 --fps 30 --enable-hid --hid-backend auto --host-info-file $DATA_DIR/controlled-host.json --audit-file $DATA_DIR/audit.jsonl --pc-agent-token-file $TOKEN_FILE --pc-agent-suggestion-file $DATA_DIR/pc-agent-suggestion.json
+ExecStart=$PYTHON3 -m agent_ip_kvm.web --host 0.0.0.0 --port 8765 --source v4l2 --device /dev/video0 --width 1920 --height 1080 --fps 30 --enable-hid --hid-backend auto --host-info-file $DATA_DIR/controlled-host.json --audit-file $DATA_DIR/audit.jsonl --pc-agent-token-file $TOKEN_FILE --pc-agent-suggestion-file $DATA_DIR/pc-agent-suggestion.json --model-setup-file $DATA_DIR/model-setup-tasks.json --pc-agent-callback-url http://192.168.128.10:8765
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=10

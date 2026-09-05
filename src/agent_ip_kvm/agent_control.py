@@ -79,6 +79,13 @@ class PeerTokenAuthenticator:
     def enabled(self) -> bool:
         return bool(self._token())
 
+    def token_for_local_bootstrap(self) -> str:
+        """Return the pairing secret to trusted server-side bootstrap code only."""
+        token = self._token()
+        if token is None:
+            raise PeerAuthenticationError("PC Agent pairing is not configured")
+        return token
+
     def require(self, authorization: str | None) -> None:
         token = self._token()
         if token is None:

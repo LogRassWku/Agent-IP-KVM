@@ -46,6 +46,13 @@ const agentModelNames = {
 let agentSessions = [];
 let activeAgentSessionId = "";
 let selectedAgentModel = "qwen2.5-1.5b";
+let modelSetupPollActive = false;
+
+const modelSetupStatusNames = {
+  awaiting_start: "等待启动", starting: "正在启动", downloading_runtime: "下载运行环境",
+  installing_runtime: "安装运行环境", downloading_model: "下载模型", verifying: "正在校验",
+  completed: "配置完成", failed: "配置失败",
+};
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
 
@@ -436,8 +443,61 @@ function renderAgentMessage(message) {
   paragraph.textContent = String(message.content ?? "");
   content.append(paragraph);
   if (message.plan) content.append(renderAgentPlan(message.plan));
+  if (message.modelSetup) content.append(renderModelSetup(message));
   article.append(content);
   return article;
+}
+
+function renderModelSetup(message) {
+  const setup = message.modelSetup;
+  const card = document.createElement("section");
+  card.className = "model-setup-card";
+  card.dataset.setupMessageId = message.id;
+  const title = document.createElement("h2"); title.textContent = "配置被控电脑模型";
+  const description = document.createElement("p");
+  description.textContent = "由开发板通过 USB 键盘启动安装器；安装进度会持续记录在此会话。";
+  card.append(title, description);
+
+  if (!setup.task) {
+    const fields = document.createElement("div"); fields.className = "model-setup-fields";
+    const modelLabel = document.createElement("label"); modelLabel.textContent = "模型";
+    const modelSelect = document.createElement("select"); modelSelect.dataset.setupField = "model";
+    for (const model of setup.catalog.models ?? []) {
+      const option = document.createElement("option"); option.value = model.id;
+      option.textContent = `${model.name}${model.recommended ? " · 推荐" : ""}`;
+      option.selected = model.id === setup.model; modelSelect.append(option);
+    }
+    modelLabel.append(modelSelect);
+    const locationLabel = document.createElement("label"); locationLabel.textContent = "模型位置";
+    const locationSelect = document.createElement("select"); locationSelect.dataset.setupField = "models_dir";
+    for (const location of setup.catalog.locations ?? []) {
+      const option = document.createElement("option"); option.value = location.models_dir;
+      option.textContent = `${location.models_dir} · ${formatBytes(location.free_bytes)} 可用`;
+      option.selected = location.models_dir === setup.modelsDir; locationSelect.append(option);
+    }
+    locationLabel.append(locationSelect);
+    const installLabel = document.createElement("label"); installLabel.className = "wide"; installLabel.textContent = "Ollama 安装位置";
+    const installInput = document.createElement("input"); installInput.dataset.setupField = "install_dir"; installInput.value = setup.installDir;
+    installInput.autocomplete = "off"; installInput.spellcheck = false; installLabel.append(installInput);
+    fields.append(modelLabel, locationLabel, installLabel); card.append(fields);
+    const start = document.createElement("button"); start.className = "model-setup-start"; start.type = "button";
+    start.dataset.setupAction = "start"; start.textContent = "开始配置"; card.append(start);
+    return card;
+  }
+
+  const task = setup.task;
+  const status = document.createElement("div"); status.className = "model-setup-status";
+  const state = document.createElement("strong"); state.textContent = modelSetupStatusNames[task.status] ?? task.status;
+  const percent = document.createElement("span"); percent.textContent = `${task.progress}%`;
+  status.append(state, percent);
+  const progress = document.createElement("div"); progress.className = "model-setup-progress";
+  progress.style.setProperty("--progress", `${task.progress}%`); progress.append(document.createElement("span"));
+  const messageText = document.createElement("p"); messageText.textContent = task.message;
+  const details = document.createElement("p"); details.textContent = `${task.model} · ${task.models_dir}`;
+  const events = document.createElement("ol"); events.className = "model-setup-events";
+  for (const event of task.events ?? []) { const item = document.createElement("li"); item.textContent = event.message; events.append(item); }
+  card.append(status, progress, messageText, details, events);
+  return card;
 }
 
 function renderAgentPlan(plan) {
@@ -586,6 +646,73 @@ async function submitAgentPrompt(prompt) {
   }
 }
 
+async function openPcAgentSetup() {
+  setAgentModelMenu(false);
+  let catalog;
+  let latest;
+  try {
+    [catalog, latest] = await Promise.all([fetchJson("/api/model-setup/catalog"), fetchJson("/api/model-setup/tasks/latest")]);
+  } catch (error) {
+    window.alert(`无法读取模型配置：${error.message}`);
+    return;
+  }
+  const locations = catalog.locations ?? [];
+  const preferred = locations.find((item) => item.drive === "D:") ?? locations[0];
+  const session = makeAgentSession();
+  session.title = "配置 PC Agent 模型";
+  const task = latest.task && !["failed"].includes(latest.task.status) ? latest.task : null;
+  session.messages.push({
+    id: newSessionId(), role: "assistant", content: task ? "已找到最近的模型配置任务。" : "请选择模型和安装位置。",
+    createdAt: Date.now(), modelSetup: {
+      catalog, model: "qwen3.5:9b", modelsDir: preferred?.models_dir ?? "D:\\AgentIPKVM\\Models",
+      installDir: `${preferred?.drive ?? "D:"}\\AgentIPKVM\\Ollama`, task,
+    },
+  });
+  agentSessions.push(session); activeAgentSessionId = session.id;
+  saveAgentSessions(); renderAgentSessions(); renderAgentConversation();
+  if (task && !["completed", "failed"].includes(task.status)) pollModelSetupTasks();
+}
+
+async function startModelSetup(card) {
+  const session = activeAgentSession();
+  const message = session.messages.find((item) => item.id === card.dataset.setupMessageId);
+  if (!message?.modelSetup || message.modelSetup.task) return;
+  const button = card.querySelector("[data-setup-action='start']"); button.disabled = true;
+  const model = card.querySelector("[data-setup-field='model']").value;
+  const modelsDir = card.querySelector("[data-setup-field='models_dir']").value;
+  const installDir = card.querySelector("[data-setup-field='install_dir']").value.trim();
+  try {
+    const created = await postJson("/api/model-setup/tasks", { model, models_dir: modelsDir, install_dir: installDir });
+    message.modelSetup.task = created.task; message.content = "模型配置任务已经创建。";
+    session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation();
+    const launched = await postJson("/api/model-setup/launch", { task_id: created.task.task_id });
+    message.modelSetup.task = launched.task; message.content = "安装指令已发送到被控电脑。";
+    session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation(); pollModelSetupTasks();
+  } catch (error) {
+    message.content = `无法启动配置：${error.message}`;
+    session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation();
+  }
+}
+
+async function pollModelSetupTasks() {
+  if (modelSetupPollActive) return;
+  modelSetupPollActive = true;
+  try {
+    let pending = false;
+    for (const session of agentSessions) {
+      for (const message of session.messages) {
+        const task = message.modelSetup?.task;
+        if (!task || ["completed", "failed"].includes(task.status)) continue;
+        pending = true;
+        try { message.modelSetup.task = (await fetchJson(`/api/model-setup/tasks/${task.task_id}`)).task; }
+        catch (_) { /* Keep the latest visible state during a transient disconnect. */ }
+      }
+    }
+    saveAgentSessions(); renderAgentConversation();
+    if (pending) window.setTimeout(pollModelSetupTasks, 2000);
+  } finally { modelSetupPollActive = false; }
+}
+
 async function handleAgentPlanAction(button) {
   const card = button.closest("[data-plan-id]");
   const session = activeAgentSession();
@@ -659,6 +786,11 @@ async function toggleStickyKeys() {
 
 async function postJson(path, payload) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
+}
+
+async function fetchJson(path) {
+  const response = await fetch(path, { cache: "no-store" });
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
 }
 
@@ -805,11 +937,15 @@ elements.agentComposer.addEventListener("submit", (event) => {
   submitAgentPrompt(elements.agentInput.value);
 });
 elements.agentConversation.addEventListener("click", (event) => {
+  const setupButton = event.target.closest("[data-setup-action]");
+  if (setupButton) { startModelSetup(setupButton.closest("[data-setup-message-id]")); return; }
   const button = event.target.closest("[data-plan-action]");
   if (button) handleAgentPlanAction(button);
 });
 elements.agentModelButton.addEventListener("click", () => setAgentModelMenu(elements.agentModelMenu.hidden));
 elements.agentModelMenu.addEventListener("click", (event) => {
+  const configure = event.target.closest("[data-config-model]");
+  if (configure && !configure.disabled) { openPcAgentSetup(); return; }
   const option = event.target.closest("[data-model-option]");
   if (option) selectAgentModel(option.dataset.modelOption);
 });
@@ -844,5 +980,5 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-loadAgentSessions(); loadAgentModel(); renderAgentSessions(); renderAgentConversation();
+loadAgentSessions(); loadAgentModel(); renderAgentSessions(); renderAgentConversation(); pollModelSetupTasks();
 setZoom(100); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000);

@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 from dataclasses import asdict, dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +30,7 @@ from .agent_control import (
     PeerTokenAuthenticator,
 )
 from .host_info import HostInfoStore
+from .model_setup import ModelSetupError, ModelSetupStore
 from .hid import (
     HidAdapter,
     HidError,
@@ -62,6 +64,8 @@ class WebConfig:
     audit_path: Path = Path("data/audit.jsonl")
     pc_agent_token_path: Path = Path("data/pc-agent-token")
     pc_agent_suggestion_path: Path = Path("data/pc-agent-suggestion.json")
+    model_setup_path: Path = Path("data/model-setup-tasks.json")
+    pc_agent_callback_url: str = "http://192.168.128.10:8765"
 
 
 def _make_source(config: WebConfig) -> VideoSource:
@@ -154,6 +158,12 @@ class HidWebController:
         "right": MouseButton.RIGHT,
         "middle": MouseButton.MIDDLE,
     }
+    _SHIFTED_CHARACTERS = {
+        "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6",
+        "&": "7", "*": "8", "(": "9", ")": "0", "_": "-", "+": "=",
+        "{": "[", "}": "]", "|": "\\", ":": ";", '"': "'", "~": "`",
+        "<": ",", ">": ".", "?": "/",
+    }
 
     def __init__(self, adapter: HidAdapter | None = None, *, backend: str = "disabled") -> None:
         self._adapter = adapter
@@ -208,6 +218,47 @@ class HidWebController:
                     if operation_error is None:
                         raise
         return {"key": key, "modifiers": modifiers}
+
+    def type_text(self, text: str, *, key_delay: float = 0.008) -> dict[str, object]:
+        """Type a bounded ASCII command through the boot-keyboard endpoint."""
+        if not isinstance(text, str) or not text or len(text) > 1024:
+            raise ValueError("text must contain between 1 and 1024 characters")
+        strokes: list[tuple[str, bool]] = []
+        for character in text:
+            if character == " ":
+                strokes.append(("space", False))
+            elif "a" <= character <= "z" or character in "0123456789-= []\\;'`,./".replace(" ", ""):
+                strokes.append((character, False))
+            elif "A" <= character <= "Z":
+                strokes.append((character.lower(), True))
+            elif character in self._SHIFTED_CHARACTERS:
+                strokes.append((self._SHIFTED_CHARACTERS[character], True))
+            else:
+                raise ValueError(f"text contains an unsupported character: {character!r}")
+        adapter = self._require_adapter()
+        with self._lock:
+            self._arm(adapter)
+            operation_error: Exception | None = None
+            try:
+                for key, shifted in strokes:
+                    if shifted:
+                        adapter.key_down("shift")
+                    adapter.key_down(key)
+                    adapter.key_up(key)
+                    if shifted:
+                        adapter.key_up("shift")
+                    if key_delay:
+                        time.sleep(key_delay)
+            except Exception as exc:
+                operation_error = exc
+                raise
+            finally:
+                try:
+                    adapter.release_all()
+                except Exception:
+                    if operation_error is None:
+                        raise
+        return {"characters": len(text)}
 
     def move_mouse(self, payload: dict[str, object]) -> dict[str, object]:
         adapter = self._require_adapter()
@@ -758,6 +809,7 @@ def create_handler(
     peer_authenticator: PeerTokenAuthenticator | None = None,
     pc_agent_store: PcAgentSuggestionStore | None = None,
     agent_coordinator: AgentCoordinator | None = None,
+    model_setup_store: ModelSetupStore | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     stream = stream_provider or VideoStreamController(config)
     hid = hid_controller or HidWebController()
@@ -765,6 +817,7 @@ def create_handler(
     audit = audit_log or AuditLog(config.audit_path)
     peer_auth = peer_authenticator or PeerTokenAuthenticator(config.pc_agent_token_path)
     pc_agent = pc_agent_store or PcAgentSuggestionStore(config.pc_agent_suggestion_path)
+    model_setup = model_setup_store or ModelSetupStore(config.model_setup_path)
     agent = agent_coordinator or AgentCoordinator(
         hid_controller=hid,
         observe=lambda: observe_stream(stream, config),
@@ -805,6 +858,37 @@ def create_handler(
                     {"pairing_enabled": peer_auth.enabled, **pc_agent.status()}
                 )
                 return
+            if path == "/api/model-setup/catalog":
+                self._send_json(model_setup.catalog(host_info.status()))
+                return
+            if path == "/api/model-setup/tasks/latest":
+                self._send_json({"task": model_setup.latest()})
+                return
+            if path.startswith("/api/model-setup/tasks/"):
+                task_id = path.rsplit("/", 1)[-1]
+                try:
+                    self._send_json({"task": model_setup.get(task_id)})
+                except ModelSetupError as exc:
+                    self._send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+                return
+            if path.startswith("/api/model-setup/bootstrap/") and path.endswith(".ps1"):
+                parts = path.removesuffix(".ps1").split("/")
+                if len(parts) != 6:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                task_id, secret = parts[4], parts[5]
+                try:
+                    script = model_setup.bootstrap(
+                        task_id,
+                        secret,
+                        base_url=config.pc_agent_callback_url,
+                        token=peer_auth.token_for_local_bootstrap(),
+                    )
+                except (ModelSetupError, PeerAuthenticationError, OSError) as exc:
+                    self._send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+                    return
+                self._send_bytes(script, "text/plain; charset=utf-8")
+                return
             if path == "/api/stream.mjpg":
                 self._send_mjpeg()
                 return
@@ -831,6 +915,9 @@ def create_handler(
                 "/api/agent/reject",
                 "/api/agent/execute",
                 "/api/pc-agent/suggestions",
+                "/api/model-setup/tasks",
+                "/api/model-setup/launch",
+                "/api/model-setup/progress",
             }:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -857,7 +944,7 @@ def create_handler(
                 length = 0
             maximum_length = (
                 65536
-                if path in {"/api/host-info", "/api/pc-agent/suggestions"}
+                if path in {"/api/host-info", "/api/pc-agent/suggestions", "/api/model-setup/progress"}
                 else 32768
                 if path.startswith("/api/agent/")
                 else 4096
@@ -910,6 +997,36 @@ def create_handler(
                         objective=suggestion["objective"],
                     )
                     result = {"suggestion": suggestion}
+                elif path == "/api/model-setup/tasks":
+                    task = model_setup.create(payload)
+                    audit.record("model_setup_created", task_id=task["task_id"], model=task["model"])
+                    result = {"task": task}
+                elif path == "/api/model-setup/launch":
+                    task_id = payload.get("task_id")
+                    if not isinstance(task_id, str):
+                        raise ModelSetupError("task_id is required")
+                    bootstrap_path = model_setup.bootstrap_path(task_id)
+                    command = (
+                        "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+                        f'"iex (irm \'{config.pc_agent_callback_url}{bootstrap_path}\')"'
+                    )
+                    hid.tap_key({"key": "r", "modifiers": ["win"]})
+                    time.sleep(0.6)
+                    hid.type_text(command)
+                    hid.tap_key({"key": "enter", "modifiers": []})
+                    task = model_setup.mark_starting(task_id)
+                    audit.record("model_setup_launched", task_id=task_id, model=task["model"])
+                    result = {"task": task}
+                elif path == "/api/model-setup/progress":
+                    peer_auth.require(self.headers.get("Authorization"))
+                    task = model_setup.update_progress(payload)
+                    audit.record(
+                        "model_setup_progress",
+                        task_id=task["task_id"],
+                        status=task["status"],
+                        progress=task["progress"],
+                    )
+                    result = {"task": task}
                 else:
                     hid.release_all()
                     result = {"hid": hid.status()}
@@ -924,6 +1041,7 @@ def create_handler(
                 json.JSONDecodeError,
                 TypeError,
                 ValueError,
+                ModelSetupError,
                 OSError,
                 VideoSourceError,
                 HidError,
@@ -1025,6 +1143,7 @@ class KVMHTTPServer(ThreadingHTTPServer):
         self.audit_log = AuditLog(config.audit_path)
         self.peer_authenticator = PeerTokenAuthenticator(config.pc_agent_token_path)
         self.pc_agent_store = PcAgentSuggestionStore(config.pc_agent_suggestion_path)
+        self.model_setup_store = ModelSetupStore(config.model_setup_path)
         self.agent_coordinator = AgentCoordinator(
             hid_controller=self.hid_controller,
             observe=lambda: observe_stream(self.stream_controller, config),
@@ -1042,6 +1161,7 @@ class KVMHTTPServer(ThreadingHTTPServer):
                 peer_authenticator=self.peer_authenticator,
                 pc_agent_store=self.pc_agent_store,
                 agent_coordinator=self.agent_coordinator,
+                model_setup_store=self.model_setup_store,
             ),
         )
 
@@ -1132,6 +1252,17 @@ def _parser() -> argparse.ArgumentParser:
         help="latest authenticated PC Agent recommendation",
     )
     parser.add_argument(
+        "--model-setup-file",
+        type=Path,
+        default=Path("data/model-setup-tasks.json"),
+        help="controlled-host model installation task cache",
+    )
+    parser.add_argument(
+        "--pc-agent-callback-url",
+        default="http://192.168.128.10:8765",
+        help="KVM address reachable by the controlled host over USB networking",
+    )
+    parser.add_argument(
         "--enable-hid",
         action="store_true",
         help="explicitly enable Web keyboard output",
@@ -1169,6 +1300,8 @@ def main(argv: list[str] | None = None) -> int:
         audit_path=args.audit_file,
         pc_agent_token_path=args.pc_agent_token_file,
         pc_agent_suggestion_path=args.pc_agent_suggestion_file,
+        model_setup_path=args.model_setup_file,
+        pc_agent_callback_url=args.pc_agent_callback_url.rstrip("/"),
     )
     hid_adapter: HidAdapter | None = None
     hid_controller: HidWebController | None = None
