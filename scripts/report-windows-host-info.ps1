@@ -17,7 +17,6 @@ $processors = @(Get-CimInstance Win32_Processor)
 $memoryModules = @(Get-CimInstance Win32_PhysicalMemory)
 $gpus = @(Get-CimInstance Win32_VideoController)
 $bios = Get-CimInstance Win32_BIOS
-$disks = @(Get-CimInstance Win32_DiskDrive)
 $volumes = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3")
 $addresses = @(
     Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True" |
@@ -28,6 +27,55 @@ $addresses = @(
 
 $secureBoot = $null
 try { $secureBoot = [bool](Confirm-SecureBootUEFI) } catch { }
+
+$diskInventory = @()
+try {
+    $diskInventory = @(Get-Disk -ErrorAction Stop | Sort-Object Number | ForEach-Object {
+        $disk = $_
+        $partitionInventory = @(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop | Sort-Object PartitionNumber | ForEach-Object {
+            $partition = $_
+            $volume = $null
+            try { $volume = $partition | Get-Volume -ErrorAction Stop } catch { }
+            [ordered]@{
+                number = [int]$partition.PartitionNumber
+                name = if ($partition.DriveLetter) { "$($partition.DriveLetter):" } else { $null }
+                label = if ($volume) { $volume.FileSystemLabel } else { $null }
+                filesystem = if ($volume) { [string]$volume.FileSystem } else { $null }
+                type = [string]$partition.Type
+                size_bytes = Convert-NullableUInt64 $partition.Size
+                free_bytes = if ($volume) { Convert-NullableUInt64 $volume.SizeRemaining } else { $null }
+                is_boot = [bool]$partition.IsBoot
+                is_system = [bool]$partition.IsSystem
+                is_hidden = [bool]$partition.IsHidden
+            }
+        })
+        [ordered]@{
+            number = [int]$disk.Number
+            model = $disk.FriendlyName
+            interface = [string]$disk.BusType
+            partition_style = [string]$disk.PartitionStyle
+            health = [string]$disk.HealthStatus
+            operational_status = (($disk.OperationalStatus | ForEach-Object { [string]$_ }) -join ", ")
+            size_bytes = Convert-NullableUInt64 $disk.Size
+            allocated_bytes = Convert-NullableUInt64 $disk.AllocatedSize
+            partitions = $partitionInventory
+        }
+    })
+} catch {
+    $diskInventory = @(Get-CimInstance Win32_DiskDrive | Sort-Object Index | ForEach-Object {
+        [ordered]@{
+            number = [int]$_.Index
+            model = $_.Model
+            interface = $_.InterfaceType
+            partition_style = $null
+            health = $_.Status
+            operational_status = $null
+            size_bytes = Convert-NullableUInt64 $_.Size
+            allocated_bytes = $null
+            partitions = @()
+        }
+    })
+}
 
 $payload = [ordered]@{
     schema_version = 1
@@ -74,13 +122,7 @@ $payload = [ordered]@{
             memory_bytes = Convert-NullableUInt64 $_.AdapterRAM
         }
     })
-    disks = @($disks | ForEach-Object {
-        [ordered]@{
-            model = $_.Model
-            interface = $_.InterfaceType
-            size_bytes = Convert-NullableUInt64 $_.Size
-        }
-    })
+    disks = $diskInventory
     volumes = @($volumes | ForEach-Object {
         [ordered]@{
             name = $_.DeviceID

@@ -71,6 +71,62 @@ function compact(values, separator = " · ") {
   return values.filter((value) => value !== null && value !== undefined && String(value).trim() !== "").join(separator) || "--";
 }
 
+function renderHostStorage(host) {
+  const container = document.querySelector("#host-storage");
+  container.replaceChildren();
+  const disks = host.disks || [];
+  const hasMappedPartitions = disks.some((disk) => (disk.partitions || []).length > 0);
+
+  disks.forEach((disk, index) => {
+    const card = document.createElement("article"); card.className = "storage-card";
+    const title = document.createElement("strong");
+    title.textContent = `磁盘 ${disk.number ?? index} · ${disk.model}`;
+    const detail = document.createElement("span");
+    detail.textContent = compact([formatBytes(disk.size_bytes), disk.interface, disk.partition_style, disk.health]);
+    card.append(title, detail);
+
+    if ((disk.partitions || []).length > 0) {
+      const partitionList = document.createElement("div"); partitionList.className = "storage-partitions";
+      for (const partition of disk.partitions) {
+        const row = document.createElement("div"); row.className = "storage-partition";
+        const name = document.createElement("b");
+        name.textContent = partition.name || `分区 ${partition.number ?? "--"}`;
+        const flags = compact([
+          partition.label,
+          partition.filesystem,
+          partition.type,
+          partition.is_system ? "系统" : null,
+          partition.is_boot ? "启动" : null,
+          partition.is_hidden ? "隐藏" : null,
+        ]);
+        const capacity = partition.free_bytes == null
+          ? `${formatBytes(partition.size_bytes)} 总计`
+          : `${formatBytes(partition.free_bytes)} 可用 / ${formatBytes(partition.size_bytes)} 总计`;
+        const summary = document.createElement("span"); summary.textContent = `${flags}\n${capacity}`;
+        row.append(name, summary); partitionList.append(row);
+      }
+      card.append(partitionList);
+    }
+    container.append(card);
+  });
+
+  if (!hasMappedPartitions && (host.volumes || []).length > 0) {
+    const card = document.createElement("article"); card.className = "storage-card";
+    const title = document.createElement("strong"); title.textContent = "已挂载分区";
+    const partitionList = document.createElement("div"); partitionList.className = "storage-partitions";
+    for (const volume of host.volumes) {
+      const row = document.createElement("div"); row.className = "storage-partition";
+      const name = document.createElement("b"); name.textContent = volume.name;
+      const summary = document.createElement("span");
+      summary.textContent = `${compact([volume.label, volume.filesystem])}\n${formatBytes(volume.free_bytes)} 可用 / ${formatBytes(volume.size_bytes)} 总计`;
+      row.append(name, summary); partitionList.append(row);
+    }
+    card.append(title, partitionList); container.append(card);
+  }
+
+  if (!container.hasChildNodes()) container.textContent = "--";
+}
+
 function updateHostInfo(report) {
   const state = document.querySelector("#host-info-state");
   const list = document.querySelector("#host-info-list");
@@ -93,8 +149,7 @@ function updateHostInfo(report) {
   text("host-memory", formatBytes(host.memory?.total_bytes));
   const speeds = [...new Set((host.memory?.modules || []).map((module) => module.speed_mts).filter(Boolean))];
   text("host-memory-speed", speeds.length ? speeds.map((speed) => `${speed} MT/s`).join("、") : "--");
-  text("host-disks", (host.disks || []).map((disk) => compact([disk.model, disk.interface, formatBytes(disk.size_bytes)])).join("\n") || "--");
-  text("host-volumes", (host.volumes || []).map((volume) => compact([volume.name, volume.label, volume.filesystem, `${formatBytes(volume.free_bytes)} 可用 / ${formatBytes(volume.size_bytes)}`])).join("\n") || "--");
+  renderHostStorage(host);
   text("host-addresses", (host.network?.addresses || []).join("\n") || "--");
 }
 

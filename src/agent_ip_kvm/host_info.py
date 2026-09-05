@@ -37,6 +37,14 @@ def _integer(value: object, name: str) -> int | None:
     return value
 
 
+def _boolean(value: object, name: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise HostInfoError(f"{name} must be a boolean")
+    return value
+
+
 def _object(value: object, name: str) -> dict[str, object]:
     if value is None:
         return {}
@@ -83,14 +91,36 @@ def validate_host_info(payload: dict[str, object]) -> dict[str, object]:
         }
         for item in _items(memory.get("modules"), "memory.modules")
     ]
-    disks = [
-        {
-            "model": _text(item.get("model"), "disks.model", required=True),
-            "interface": _text(item.get("interface"), "disks.interface"),
-            "size_bytes": _integer(item.get("size_bytes"), "disks.size_bytes"),
-        }
-        for item in _items(payload.get("disks"), "disks")
-    ]
+    disks = []
+    for item in _items(payload.get("disks"), "disks"):
+        partitions = [
+            {
+                "number": _integer(partition.get("number"), "disks.partitions.number"),
+                "name": _text(partition.get("name"), "disks.partitions.name"),
+                "label": _text(partition.get("label"), "disks.partitions.label"),
+                "filesystem": _text(partition.get("filesystem"), "disks.partitions.filesystem"),
+                "type": _text(partition.get("type"), "disks.partitions.type"),
+                "size_bytes": _integer(partition.get("size_bytes"), "disks.partitions.size_bytes"),
+                "free_bytes": _integer(partition.get("free_bytes"), "disks.partitions.free_bytes"),
+                "is_boot": _boolean(partition.get("is_boot"), "disks.partitions.is_boot"),
+                "is_system": _boolean(partition.get("is_system"), "disks.partitions.is_system"),
+                "is_hidden": _boolean(partition.get("is_hidden"), "disks.partitions.is_hidden"),
+            }
+            for partition in _items(item.get("partitions"), "disks.partitions")
+        ]
+        disks.append(
+            {
+                "number": _integer(item.get("number"), "disks.number"),
+                "model": _text(item.get("model"), "disks.model", required=True),
+                "interface": _text(item.get("interface"), "disks.interface"),
+                "partition_style": _text(item.get("partition_style"), "disks.partition_style"),
+                "health": _text(item.get("health"), "disks.health"),
+                "operational_status": _text(item.get("operational_status"), "disks.operational_status"),
+                "size_bytes": _integer(item.get("size_bytes"), "disks.size_bytes"),
+                "allocated_bytes": _integer(item.get("allocated_bytes"), "disks.allocated_bytes"),
+                "partitions": partitions,
+            }
+        )
     volumes = [
         {
             "name": _text(item.get("name"), "volumes.name", required=True),

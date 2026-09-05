@@ -43,8 +43,48 @@ def inventory() -> dict[str, object]:
             ],
         },
         "gpus": [{"name": "Example GPU", "driver_version": "1.0", "memory_bytes": 8589934592}],
-        "disks": [{"model": "Example SSD", "interface": "NVMe", "size_bytes": 1000204886016}],
-        "volumes": [{"name": "C:", "label": "System", "filesystem": "NTFS", "size_bytes": 999000000000, "free_bytes": 500000000000}],
+        "disks": [
+            {
+                "number": 0,
+                "model": "Example SSD",
+                "interface": "NVMe",
+                "partition_style": "GPT",
+                "health": "Healthy",
+                "operational_status": "Online",
+                "size_bytes": 1000204886016,
+                "allocated_bytes": 999000000000,
+                "partitions": [
+                    {
+                        "number": 3,
+                        "name": "C:",
+                        "label": "System",
+                        "filesystem": "NTFS",
+                        "type": "Basic",
+                        "size_bytes": 999000000000,
+                        "free_bytes": 500000000000,
+                        "is_boot": True,
+                        "is_system": False,
+                        "is_hidden": False,
+                    },
+                    {
+                        "number": 4,
+                        "name": "D:",
+                        "label": "Data",
+                        "filesystem": "NTFS",
+                        "type": "Basic",
+                        "size_bytes": 480000000000,
+                        "free_bytes": 320000000000,
+                        "is_boot": False,
+                        "is_system": False,
+                        "is_hidden": False,
+                    }
+                ],
+            }
+        ],
+        "volumes": [
+            {"name": "C:", "label": "System", "filesystem": "NTFS", "size_bytes": 519000000000, "free_bytes": 180000000000},
+            {"name": "D:", "label": "Data", "filesystem": "NTFS", "size_bytes": 480000000000, "free_bytes": 320000000000},
+        ],
         "network": {"addresses": ["192.168.137.20"]},
     }
 
@@ -60,6 +100,8 @@ class HostInfoTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "available")
             self.assertEqual(result["data"]["hostname"], "TEST-PC")
+            self.assertEqual(result["data"]["disks"][0]["number"], 0)
+            self.assertEqual(result["data"]["disks"][0]["partitions"][0]["name"], "C:")
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["schema_version"], 1)
             self.assertFalse(path.with_suffix(".json.tmp").exists())
 

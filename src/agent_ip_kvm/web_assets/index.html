@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <title>Agent IP KVM</title>
-    <link rel="stylesheet" href="/styles.css?v=20260906-9">
+    <link rel="stylesheet" href="/styles.css?v=20260906-11">
   </head>
   <body>
     <header class="topbar" id="topbar">
@@ -163,8 +163,7 @@
           <div><dt>GPU</dt><dd id="host-gpu">--</dd></div>
           <div><dt>内存</dt><dd id="host-memory">--</dd></div>
           <div><dt>内存频率</dt><dd id="host-memory-speed">--</dd></div>
-          <div><dt>物理磁盘</dt><dd id="host-disks">--</dd></div>
-          <div><dt>分区</dt><dd id="host-volumes">--</dd></div>
+          <div class="storage-info-row"><dt>磁盘与分区</dt><dd class="storage-list" id="host-storage">--</dd></div>
           <div><dt>网络地址</dt><dd id="host-addresses">--</dd></div>
         </dl>
       </section>
@@ -192,6 +191,6 @@
       </section>
     </aside>
 
-    <script src="/app.js?v=20260906-9"></script>
+    <script src="/app.js?v=20260906-11"></script>
   </body>
 </html>

@@ -483,6 +483,17 @@ body.agent-mode .agent-shell { transform: translateX(0); }
 .info-state.error { color: #ff858e; background: rgba(255, 96, 107, .12); }
 .host-info-list { margin-top: 10px; }
 .host-info-list dd { white-space: pre-line; }
+.info-list .storage-info-row { display: block; }
+.storage-info-row dt { margin-bottom: 9px; }
+.storage-list { display: grid; gap: 8px; white-space: normal; }
+.storage-card { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.025); }
+.storage-card strong, .storage-card span { display: block; }
+.storage-card strong { margin-bottom: 4px; color: #e8edf3; font-size: 12px; }
+.storage-card span { color: var(--muted); font-size: 11px; line-height: 1.55; }
+.info-list .storage-partitions { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 9px; padding: 8px 0 0; border-top: 1px solid rgba(255,255,255,.07); }
+.info-list .storage-partition { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; padding: 0; }
+.storage-partition b { color: #dfe5ec; font-size: 11px; font-weight: 650; }
+.storage-partition span { white-space: pre-line; overflow-wrap: anywhere; }
 .info-list { margin: 0; }
 .info-list div { display: grid; grid-template-columns: 86px 1fr; gap: 12px; padding: 8px 0; }
 .info-list dt { color: var(--muted); font-size: 12px; }
