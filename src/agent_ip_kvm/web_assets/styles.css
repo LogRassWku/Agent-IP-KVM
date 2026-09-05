@@ -77,8 +77,25 @@ button { color: inherit; font: inherit; }
   background: #0b1018;
   font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
 }
-.mouse-menu { width: 190px; }
-.mouse-menu select { margin-bottom: 0; }
+.mouse-menu { width: 220px; }
+.mouse-menu select { margin-bottom: 12px; }
+.mouse-message { min-height: 17px; margin: 0 0 9px; color: var(--muted); font-size: 11px; }
+.control-hint { margin: 9px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.video-shell.mouse-captured::after {
+  content: "鼠标控制中 · Esc 退出";
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #dfe5ec;
+  background: rgba(17, 23, 34, .9);
+  font-size: 11px;
+  pointer-events: none;
+}
 .zoom-buttons {
   position: absolute;
   z-index: 4;

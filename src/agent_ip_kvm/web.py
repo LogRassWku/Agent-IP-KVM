@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -16,8 +18,15 @@ from typing import Callable, Iterator, Protocol
 from urllib.parse import urlsplit
 
 from . import __version__
-from .hid import HidAdapter, HidError, HidState, LinuxGadgetHidAdapter, SimulatedHidAdapter
-from .hid.linux_gadget import KEY_USAGES, wait_for_hidg_path
+from .hid import (
+    HidAdapter,
+    HidError,
+    HidState,
+    LinuxGadgetHidAdapter,
+    MouseButton,
+    SimulatedHidAdapter,
+)
+from .hid.linux_gadget import KEY_USAGES, resolve_hidg_path, wait_for_hidg_path
 from .video import (
     EndOfStream,
     FFmpegFileVideoSource,
@@ -121,10 +130,15 @@ class HidWebController:
     """Expose a deliberately small, serialized HID surface to the Web UI."""
 
     _MODIFIERS = {"ctrl", "shift", "alt", "win"}
+    _MOUSE_BUTTONS = {
+        "left": MouseButton.LEFT,
+        "right": MouseButton.RIGHT,
+        "middle": MouseButton.MIDDLE,
+    }
 
     def __init__(self, adapter: HidAdapter | None = None, *, backend: str = "disabled") -> None:
         self._adapter = adapter
-        self._backend = backend if adapter is not None else "disabled"
+        self._backend = backend
         self._lock = threading.Lock()
 
     def status(self) -> dict[str, object]:
@@ -132,7 +146,9 @@ class HidWebController:
         return {
             "enabled": adapter is not None,
             "backend": self._backend,
-            "state": adapter.state.value if adapter is not None else "disabled",
+            "state": adapter.state.value if adapter is not None else (
+                "disabled" if self._backend == "disabled" else "disconnected"
+            ),
         }
 
     def tap_key(self, payload: dict[str, object]) -> dict[str, object]:
@@ -172,6 +188,51 @@ class HidWebController:
                         raise
         return {"key": key, "modifiers": modifiers}
 
+    def move_mouse(self, payload: dict[str, object]) -> dict[str, object]:
+        adapter = self._require_adapter()
+        delta_x = self._integer(payload.get("delta_x", 0), "delta_x")
+        delta_y = self._integer(payload.get("delta_y", 0), "delta_y")
+        wheel = self._integer(payload.get("wheel", 0), "wheel")
+        if not -4096 <= delta_x <= 4096 or not -4096 <= delta_y <= 4096:
+            raise ValueError("mouse movement must be between -4096 and 4096")
+        if not -127 <= wheel <= 127:
+            raise ValueError("wheel must be between -127 and 127")
+        with self._lock:
+            self._arm(adapter)
+            remaining_x, remaining_y = delta_x, delta_y
+            while remaining_x or remaining_y:
+                step_x = max(-127, min(127, remaining_x))
+                step_y = max(-127, min(127, remaining_y))
+                adapter.mouse_move(step_x, step_y)
+                remaining_x -= step_x
+                remaining_y -= step_y
+            if wheel:
+                adapter.mouse_move(0, 0, wheel)
+        return {"delta_x": delta_x, "delta_y": delta_y, "wheel": wheel}
+
+    def click_mouse(self, payload: dict[str, object]) -> dict[str, object]:
+        adapter = self._require_adapter()
+        name = payload.get("button")
+        if not isinstance(name, str) or name not in self._MOUSE_BUTTONS:
+            raise ValueError("unsupported mouse button")
+        button = self._MOUSE_BUTTONS[name]
+        with self._lock:
+            self._arm(adapter)
+            operation_error: Exception | None = None
+            try:
+                adapter.button_down(button)
+                adapter.button_up(button)
+            except Exception as exc:
+                operation_error = exc
+                raise
+            finally:
+                try:
+                    adapter.release_all()
+                except Exception:
+                    if operation_error is None:
+                        raise
+        return {"button": name}
+
     def release_all(self) -> None:
         adapter = self._require_adapter()
         with self._lock:
@@ -189,6 +250,88 @@ class HidWebController:
         if self._adapter is None:
             raise HidError("HID output is not enabled on this server")
         return self._adapter
+
+    @staticmethod
+    def _integer(value: object, name: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+        return value
+
+    @staticmethod
+    def _arm(adapter: HidAdapter) -> None:
+        if adapter.state is HidState.CLOSED:
+            adapter.arm()
+        if adapter.state is not HidState.READY:
+            raise HidError(f"HID is not ready: {adapter.state.value}")
+
+
+HidDeviceResolver = Callable[[], tuple[Path, Path] | None]
+HidAdapterFactory = Callable[[Path, Path], HidAdapter]
+
+
+def _linux_hid_device_resolver(
+    gadget_root: Path,
+    dev_root: Path = Path("/dev"),
+    keyboard_function: str = "hid.keyboard",
+    mouse_function: str = "hid.mouse",
+) -> HidDeviceResolver:
+    def resolve() -> tuple[Path, Path] | None:
+        try:
+            udc_name = (gadget_root / "UDC").read_text(encoding="ascii").strip()
+            if not udc_name:
+                return None
+            state = Path("/sys/class/udc", udc_name, "state").read_text(
+                encoding="ascii"
+            ).strip()
+            if state != "configured":
+                return None
+            functions = gadget_root / "functions"
+            keyboard_path = resolve_hidg_path(functions / keyboard_function, dev_root)
+            mouse_path = resolve_hidg_path(functions / mouse_function, dev_root)
+            if not os.access(keyboard_path, os.W_OK) or not os.access(mouse_path, os.W_OK):
+                return None
+            return keyboard_path, mouse_path
+        except (OSError, HidError):
+            return None
+
+    return resolve
+
+
+class AutoLinuxHidController(HidWebController):
+    """Attach to Gadget HID endpoints when a USB host configures them."""
+
+    def __init__(
+        self,
+        device_resolver: HidDeviceResolver,
+        adapter_factory: HidAdapterFactory = LinuxGadgetHidAdapter,
+    ) -> None:
+        super().__init__(backend="linux-auto")
+        self._device_resolver = device_resolver
+        self._adapter_factory = adapter_factory
+        self._device_signature: tuple[Path, Path] | None = None
+
+    def status(self) -> dict[str, object]:
+        self._sync()
+        return super().status()
+
+    def _require_adapter(self) -> HidAdapter:
+        self._sync()
+        return super()._require_adapter()
+
+    def _sync(self) -> None:
+        signature = self._device_resolver()
+        with self._lock:
+            if signature == self._device_signature and self._adapter is not None:
+                if self._adapter.state is not HidState.ERROR:
+                    return
+            if self._adapter is not None:
+                with contextlib.suppress(HidError, OSError):
+                    self._adapter.close()
+                self._adapter = None
+                self._device_signature = None
+            if signature is not None:
+                self._adapter = self._adapter_factory(*signature)
+                self._device_signature = signature
 
 
 class _FFmpegJPEGEncoder:
@@ -485,7 +628,13 @@ def create_handler(
 
         def do_POST(self) -> None:
             path = urlsplit(self.path).path
-            if path not in {"/api/video-settings", "/api/hid/key", "/api/hid/release"}:
+            if path not in {
+                "/api/video-settings",
+                "/api/hid/key",
+                "/api/hid/mouse-move",
+                "/api/hid/mouse-click",
+                "/api/hid/release",
+            }:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip()
@@ -523,6 +672,10 @@ def create_handler(
                     result = {"video": settings_updater(payload)}
                 elif path == "/api/hid/key":
                     result = {"hid": hid.tap_key(payload)}
+                elif path == "/api/hid/mouse-move":
+                    result = {"hid": hid.move_mouse(payload)}
+                elif path == "/api/hid/mouse-click":
+                    result = {"hid": hid.click_mouse(payload)}
                 else:
                     hid.release_all()
                     result = {"hid": hid.status()}
@@ -591,10 +744,13 @@ class KVMHTTPServer(ThreadingHTTPServer):
         hid_adapter: HidAdapter | None = None,
         *,
         hid_backend: str = "disabled",
+        hid_controller: HidWebController | None = None,
     ) -> None:
         self.config = config
         self.stream_controller = VideoStreamController(config)
-        self.hid_controller = HidWebController(hid_adapter, backend=hid_backend)
+        self.hid_controller = hid_controller or HidWebController(
+            hid_adapter, backend=hid_backend
+        )
         super().__init__(
             server_address,
             create_handler(
@@ -646,9 +802,14 @@ def create_server(
     hid_adapter: HidAdapter | None = None,
     *,
     hid_backend: str = "disabled",
+    hid_controller: HidWebController | None = None,
 ) -> KVMHTTPServer:
     return KVMHTTPServer(
-        (host, port), config, hid_adapter=hid_adapter, hid_backend=hid_backend
+        (host, port),
+        config,
+        hid_adapter=hid_adapter,
+        hid_backend=hid_backend,
+        hid_controller=hid_controller,
     )
 
 
@@ -667,7 +828,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="explicitly enable Web keyboard output",
     )
-    parser.add_argument("--hid-backend", choices=("linux", "simulated"), default="linux")
+    parser.add_argument(
+        "--hid-backend",
+        choices=("auto", "linux", "simulated"),
+        default="auto",
+        help="auto discovers connected Linux Gadget HID endpoints",
+    )
     parser.add_argument(
         "--gadget-root",
         type=Path,
@@ -692,7 +858,16 @@ def main(argv: list[str] | None = None) -> int:
         fps=args.fps,
     )
     hid_adapter: HidAdapter | None = None
-    if args.enable_hid:
+    hid_controller: HidWebController | None = None
+    if args.hid_backend == "auto":
+        hid_controller = AutoLinuxHidController(
+            _linux_hid_device_resolver(
+                args.gadget_root,
+                keyboard_function=args.keyboard_function,
+                mouse_function=args.mouse_function,
+            )
+        )
+    elif args.enable_hid:
         if args.hid_backend == "simulated":
             hid_adapter = SimulatedHidAdapter()
         else:
@@ -710,6 +885,7 @@ def main(argv: list[str] | None = None) -> int:
         config,
         hid_adapter=hid_adapter,
         hid_backend=args.hid_backend if args.enable_hid else "disabled",
+        hid_controller=hid_controller,
     )
     print(f"Agent IP KVM web interface: http://{args.host}:{args.port}")
     try:

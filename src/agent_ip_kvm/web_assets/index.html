@@ -26,6 +26,9 @@
               <option value="medium" selected>中</option>
               <option value="large">大</option>
             </select>
+            <p class="mouse-message" id="mouse-message" role="status" aria-live="polite">正在读取 HID 状态</p>
+            <button class="apply-button" id="mouse-capture" type="button" disabled>开始控制</button>
+            <p class="control-hint">进入后移动、点击和滚轮会发送到目标电脑，按 Esc 退出。</p>
           </section>
         </div>
         <button class="tool-button" id="keyboard-button" type="button" title="屏幕键盘" aria-expanded="false" aria-controls="onscreen-keyboard">

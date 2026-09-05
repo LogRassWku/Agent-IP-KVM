@@ -8,6 +8,7 @@ const elements = {
   screenMessage: document.querySelector("#screen-message"), applyScreenSettings: document.querySelector("#apply-screen-settings"),
   zoomOut: document.querySelector("#zoom-out"), zoomIn: document.querySelector("#zoom-in"),
   mouseButton: document.querySelector("#mouse-button"), mouseMenu: document.querySelector("#mouse-menu"),
+  mouseMessage: document.querySelector("#mouse-message"), mouseCapture: document.querySelector("#mouse-capture"),
   cursorSizeSelect: document.querySelector("#cursor-size-select"), keyboardButton: document.querySelector("#keyboard-button"),
   keyboard: document.querySelector("#onscreen-keyboard"), closeKeyboard: document.querySelector("#close-keyboard"),
   keyboardRows: document.querySelector("#keyboard-rows"), hidMessage: document.querySelector("#hid-message"),
@@ -19,6 +20,10 @@ let videoModes = [];
 let hidEnabled = false;
 let zoomPercent = 100;
 const activeModifiers = new Set();
+let pendingMouseX = 0;
+let pendingMouseY = 0;
+let pendingWheel = 0;
+let mouseRequestActive = false;
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
 
@@ -85,10 +90,18 @@ function clearModifiers() {
 
 function updateHidStatus(hid) {
   hidEnabled = Boolean(hid?.enabled && hid?.state !== "stopped" && hid?.state !== "error");
-  elements.hidMessage.textContent = hidEnabled ? (hid.backend === "simulated" ? "HID 模拟模式" : "HID 已连接") : "HID 尚未启用";
+  const disconnected = hid?.backend === "linux-auto";
+  const statusText = hidEnabled ? (hid.backend === "simulated" ? "HID 模拟模式" : "HID 已连接")
+    : (disconnected ? "HID 未连接" : "HID 尚未启用");
+  elements.hidMessage.textContent = statusText;
+  elements.mouseMessage.textContent = statusText;
+  elements.mouseCapture.disabled = !hidEnabled;
   elements.releaseKeys.disabled = !hidEnabled;
   for (const key of elements.keyboardRows.querySelectorAll("button")) key.disabled = !hidEnabled;
-  if (!hidEnabled) clearModifiers();
+  if (!hidEnabled) {
+    clearModifiers();
+    if (document.pointerLockElement === elements.videoShell) document.exitPointerLock();
+  }
 }
 
 function updateStatus(payload) {
@@ -159,6 +172,34 @@ async function postJson(path, payload) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
 }
+
+async function flushMouseMovement() {
+  if (mouseRequestActive || document.pointerLockElement !== elements.videoShell || !hidEnabled) return;
+  const deltaX = Math.max(-4096, Math.min(4096, Math.round(pendingMouseX)));
+  const deltaY = Math.max(-4096, Math.min(4096, Math.round(pendingMouseY)));
+  const wheel = Math.max(-127, Math.min(127, Math.round(pendingWheel)));
+  if (!deltaX && !deltaY && !wheel) return;
+  pendingMouseX -= deltaX; pendingMouseY -= deltaY; pendingWheel -= wheel;
+  mouseRequestActive = true;
+  try {
+    await postJson("/api/hid/mouse-move", { delta_x: deltaX, delta_y: deltaY, wheel });
+  } catch (error) {
+    elements.mouseMessage.textContent = error.message;
+    document.exitPointerLock();
+    await refreshStatus();
+  } finally {
+    mouseRequestActive = false;
+    if (pendingMouseX || pendingMouseY || pendingWheel) requestAnimationFrame(flushMouseMovement);
+  }
+}
+
+async function clickMouse(buttonNumber) {
+  const names = { 0: "left", 1: "middle", 2: "right" };
+  const button = names[buttonNumber];
+  if (!button || !hidEnabled) return;
+  try { await postJson("/api/hid/mouse-click", { button }); }
+  catch (error) { elements.mouseMessage.textContent = error.message; document.exitPointerLock(); await refreshStatus(); }
+}
 async function tapKey(button) {
   if (!hidEnabled) return;
   button.disabled = true;
@@ -182,6 +223,37 @@ elements.closeKeyboard.addEventListener("click", () => setKeyboard(false));
 elements.zoomOut.addEventListener("click", () => setZoom(zoomPercent - 10));
 elements.zoomIn.addEventListener("click", () => setZoom(zoomPercent + 10));
 elements.cursorSizeSelect.addEventListener("change", () => setCursorSize(elements.cursorSizeSelect.value));
+elements.mouseCapture.addEventListener("click", async () => {
+  if (!hidEnabled) return;
+  try { await elements.videoShell.requestPointerLock(); setMouseMenu(false); }
+  catch (error) { elements.mouseMessage.textContent = "浏览器无法进入鼠标控制"; }
+});
+document.addEventListener("pointerlockchange", async () => {
+  const captured = document.pointerLockElement === elements.videoShell;
+  elements.videoShell.classList.toggle("mouse-captured", captured);
+  elements.mouseCapture.textContent = captured ? "控制中" : "开始控制";
+  pendingMouseX = 0; pendingMouseY = 0; pendingWheel = 0;
+  if (!captured && hidEnabled) {
+    try { await postJson("/api/hid/release", {}); }
+    catch (error) { elements.mouseMessage.textContent = error.message; }
+  }
+});
+document.addEventListener("mousemove", (event) => {
+  if (document.pointerLockElement !== elements.videoShell) return;
+  pendingMouseX += event.movementX; pendingMouseY += event.movementY;
+  requestAnimationFrame(flushMouseMovement);
+});
+document.addEventListener("mousedown", (event) => {
+  if (document.pointerLockElement !== elements.videoShell) return;
+  event.preventDefault(); clickMouse(event.button);
+});
+document.addEventListener("wheel", (event) => {
+  if (document.pointerLockElement !== elements.videoShell) return;
+  event.preventDefault(); pendingWheel += Math.sign(-event.deltaY); requestAnimationFrame(flushMouseMovement);
+}, { passive: false });
+elements.videoShell.addEventListener("contextmenu", (event) => {
+  if (document.pointerLockElement === elements.videoShell) event.preventDefault();
+});
 elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {
   const button = event.target.closest("button"); if (!button || button.disabled) return;
@@ -199,7 +271,7 @@ elements.applyScreenSettings.addEventListener("click", async () => {
   finally { elements.applyScreenSettings.disabled = videoModes.length === 0; }
 });
 document.addEventListener("click", (event) => {
-  if (!event.target.closest("#mouse-tool-menu")) setMouseMenu(false);
+  if (!event.target.closest("#mouse-tool-menu") && !event.target.closest("#mouse-button")) setMouseMenu(false);
   if (!event.target.closest("#screen-menu") && !event.target.closest("#screen-button")) setScreenMenu(false);
 });
 document.addEventListener("keydown", (event) => {

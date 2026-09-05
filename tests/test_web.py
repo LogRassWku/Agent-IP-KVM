@@ -6,7 +6,13 @@ from urllib.error import HTTPError
 
 from agent_ip_kvm.hid import SimulatedEventKind, SimulatedHidAdapter
 from agent_ip_kvm.video import EndOfStream, Frame, SourceCapability, SourceHealth
-from agent_ip_kvm.web import HidWebController, VideoStreamController, WebConfig, create_server
+from agent_ip_kvm.web import (
+    AutoLinuxHidController,
+    HidWebController,
+    VideoStreamController,
+    WebConfig,
+    create_server,
+)
 
 
 class StaticStream:
@@ -90,6 +96,7 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertIn('id="zoom-in"', page)
             self.assertNotIn('id="zoom-range"', page)
             self.assertIn('id="cursor-size-select"', page)
+            self.assertIn('id="mouse-capture"', page)
             self.assertIn('id="onscreen-keyboard"', page)
             self.assertIn('data-key="enter"', page)
             self.assertIn('id="resolution-select"', page)
@@ -141,6 +148,54 @@ class WebInterfaceTests(unittest.TestCase):
 
         self.assertEqual(adapter.events, ())
 
+    def test_hid_controller_maps_relative_mouse_and_click(self) -> None:
+        adapter = SimulatedHidAdapter()
+        controller = HidWebController(adapter, backend="simulated")
+
+        movement = controller.move_mouse(
+            {"delta_x": 200, "delta_y": -140, "wheel": 1}
+        )
+        click = controller.click_mouse({"button": "left"})
+
+        self.assertEqual(movement, {"delta_x": 200, "delta_y": -140, "wheel": 1})
+        self.assertEqual(click, {"button": "left"})
+        self.assertEqual(
+            [event.kind for event in adapter.events],
+            [
+                SimulatedEventKind.ARMED,
+                SimulatedEventKind.MOUSE_MOVE,
+                SimulatedEventKind.MOUSE_MOVE,
+                SimulatedEventKind.MOUSE_MOVE,
+                SimulatedEventKind.BUTTON_DOWN,
+                SimulatedEventKind.BUTTON_UP,
+            ],
+        )
+        self.assertEqual(adapter.pressed_buttons, frozenset())
+
+    def test_auto_hid_controller_tracks_endpoint_connection(self) -> None:
+        current = {"devices": None}
+        adapters = []
+
+        def resolver():
+            return current["devices"]
+
+        def factory(keyboard, mouse):
+            adapter = SimulatedHidAdapter()
+            adapters.append(adapter)
+            return adapter
+
+        controller = AutoLinuxHidController(resolver, factory)
+        self.assertEqual(controller.status()["state"], "disconnected")
+
+        current["devices"] = ("keyboard", "mouse")
+        self.assertTrue(controller.status()["enabled"])
+        controller.tap_key({"key": "a", "modifiers": []})
+        self.assertEqual(adapters[0].pressed_keys, frozenset())
+
+        current["devices"] = None
+        self.assertEqual(controller.status()["state"], "disconnected")
+        self.assertFalse(controller.status()["enabled"])
+
     def test_web_hid_key_endpoint_uses_explicit_adapter(self) -> None:
         self.server.shutdown()
         self.server.server_close()
@@ -168,7 +223,32 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(payload["hid"]["key"], "enter")
 
+        request = Request(
+            f"{self.base_url}/api/hid/mouse-move",
+            data=json.dumps(
+                {"delta_x": 12, "delta_y": -8, "wheel": 1}
+            ).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["hid"]["delta_x"], 12)
+
+        request = Request(
+            f"{self.base_url}/api/hid/mouse-click",
+            data=json.dumps({"button": "left"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["hid"]["button"], "left")
+
         self.assertEqual(adapter.pressed_keys, frozenset())
+        self.assertEqual(adapter.pressed_buttons, frozenset())
 
     def test_web_hid_rejects_cross_origin_requests(self) -> None:
         request = Request(
