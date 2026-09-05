@@ -24,6 +24,8 @@ let pendingMouseX = 0;
 let pendingMouseY = 0;
 let pendingWheel = 0;
 let mouseRequestActive = false;
+let mouseControlMode = "off";
+let fallbackMousePosition = null;
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
 
@@ -94,13 +96,13 @@ function updateHidStatus(hid) {
   const statusText = hidEnabled ? (hid.backend === "simulated" ? "HID 模拟模式" : "HID 已连接")
     : (disconnected ? "HID 未连接" : "HID 尚未启用");
   elements.hidMessage.textContent = statusText;
-  elements.mouseMessage.textContent = statusText;
+  elements.mouseMessage.textContent = mouseControlMode === "fallback" && hidEnabled ? "区域鼠标控制中" : statusText;
   elements.mouseCapture.disabled = !hidEnabled;
   elements.releaseKeys.disabled = !hidEnabled;
   for (const key of elements.keyboardRows.querySelectorAll("button")) key.disabled = !hidEnabled;
   if (!hidEnabled) {
     clearModifiers();
-    if (document.pointerLockElement === elements.videoShell) document.exitPointerLock();
+    stopMouseControl();
   }
 }
 
@@ -174,7 +176,7 @@ async function postJson(path, payload) {
 }
 
 async function flushMouseMovement() {
-  if (mouseRequestActive || document.pointerLockElement !== elements.videoShell || !hidEnabled) return;
+  if (mouseRequestActive || mouseControlMode === "off" || !hidEnabled) return;
   const deltaX = Math.max(-4096, Math.min(4096, Math.round(pendingMouseX)));
   const deltaY = Math.max(-4096, Math.min(4096, Math.round(pendingMouseY)));
   const wheel = Math.max(-127, Math.min(127, Math.round(pendingWheel)));
@@ -185,7 +187,7 @@ async function flushMouseMovement() {
     await postJson("/api/hid/mouse-move", { delta_x: deltaX, delta_y: deltaY, wheel });
   } catch (error) {
     elements.mouseMessage.textContent = error.message;
-    document.exitPointerLock();
+    await stopMouseControl();
     await refreshStatus();
   } finally {
     mouseRequestActive = false;
@@ -198,7 +200,50 @@ async function clickMouse(buttonNumber) {
   const button = names[buttonNumber];
   if (!button || !hidEnabled) return;
   try { await postJson("/api/hid/mouse-click", { button }); }
-  catch (error) { elements.mouseMessage.textContent = error.message; document.exitPointerLock(); await refreshStatus(); }
+  catch (error) { elements.mouseMessage.textContent = error.message; await stopMouseControl(); await refreshStatus(); }
+}
+
+function setMouseControlMode(mode) {
+  mouseControlMode = mode;
+  fallbackMousePosition = null;
+  pendingMouseX = 0; pendingMouseY = 0; pendingWheel = 0;
+  const active = mode !== "off";
+  elements.videoShell.classList.toggle("mouse-control-active", active);
+  elements.mouseCapture.textContent = active ? "停止控制" : "开始控制";
+  if (mode === "fallback") elements.mouseMessage.textContent = "区域鼠标控制中";
+}
+
+async function stopMouseControl() {
+  const wasActive = mouseControlMode !== "off";
+  setMouseControlMode("off");
+  if (document.pointerLockElement === elements.videoShell) document.exitPointerLock();
+  if (wasActive && hidEnabled) {
+    try { await postJson("/api/hid/release", {}); }
+    catch (error) { elements.mouseMessage.textContent = error.message; }
+  }
+}
+
+function startFallbackMouseControl() {
+  if (document.pointerLockElement === elements.videoShell) return;
+  setMouseControlMode("fallback");
+}
+
+async function startMouseControl() {
+  if (!hidEnabled) return;
+  setMouseMenu(false);
+  if (typeof elements.videoShell.requestPointerLock !== "function") {
+    startFallbackMouseControl();
+    return;
+  }
+  try {
+    const request = elements.videoShell.requestPointerLock();
+    if (request && typeof request.catch === "function") await request;
+    window.setTimeout(() => {
+      if (document.pointerLockElement !== elements.videoShell && mouseControlMode === "off") startFallbackMouseControl();
+    }, 250);
+  } catch (error) {
+    startFallbackMouseControl();
+  }
 }
 async function tapKey(button) {
   if (!hidEnabled) return;
@@ -224,36 +269,44 @@ elements.zoomOut.addEventListener("click", () => setZoom(zoomPercent - 10));
 elements.zoomIn.addEventListener("click", () => setZoom(zoomPercent + 10));
 elements.cursorSizeSelect.addEventListener("change", () => setCursorSize(elements.cursorSizeSelect.value));
 elements.mouseCapture.addEventListener("click", async () => {
-  if (!hidEnabled) return;
-  try { await elements.videoShell.requestPointerLock(); setMouseMenu(false); }
-  catch (error) { elements.mouseMessage.textContent = "浏览器无法进入鼠标控制"; }
+  if (mouseControlMode === "off") await startMouseControl(); else await stopMouseControl();
 });
 document.addEventListener("pointerlockchange", async () => {
   const captured = document.pointerLockElement === elements.videoShell;
-  elements.videoShell.classList.toggle("mouse-captured", captured);
-  elements.mouseCapture.textContent = captured ? "控制中" : "开始控制";
-  pendingMouseX = 0; pendingMouseY = 0; pendingWheel = 0;
-  if (!captured && hidEnabled) {
-    try { await postJson("/api/hid/release", {}); }
-    catch (error) { elements.mouseMessage.textContent = error.message; }
-  }
+  if (captured) setMouseControlMode("locked");
+  else if (mouseControlMode === "locked") await stopMouseControl();
 });
+document.addEventListener("pointerlockerror", startFallbackMouseControl);
 document.addEventListener("mousemove", (event) => {
-  if (document.pointerLockElement !== elements.videoShell) return;
-  pendingMouseX += event.movementX; pendingMouseY += event.movementY;
+  if (mouseControlMode === "locked") {
+    pendingMouseX += event.movementX; pendingMouseY += event.movementY;
+  } else if (mouseControlMode === "fallback") {
+    if (!elements.videoShell.contains(event.target) || event.target.closest(".zoom-buttons")) {
+      fallbackMousePosition = null;
+      return;
+    }
+    if (fallbackMousePosition) {
+      pendingMouseX += event.clientX - fallbackMousePosition.x;
+      pendingMouseY += event.clientY - fallbackMousePosition.y;
+    }
+    fallbackMousePosition = { x: event.clientX, y: event.clientY };
+  } else return;
   requestAnimationFrame(flushMouseMovement);
 });
 document.addEventListener("mousedown", (event) => {
-  if (document.pointerLockElement !== elements.videoShell) return;
+  const onVideo = elements.videoShell.contains(event.target) && !event.target.closest(".zoom-buttons");
+  if (mouseControlMode === "off" || (mouseControlMode === "fallback" && !onVideo)) return;
   event.preventDefault(); clickMouse(event.button);
 });
 document.addEventListener("wheel", (event) => {
-  if (document.pointerLockElement !== elements.videoShell) return;
+  const onVideo = elements.videoShell.contains(event.target) && !event.target.closest(".zoom-buttons");
+  if (mouseControlMode === "off" || (mouseControlMode === "fallback" && !onVideo)) return;
   event.preventDefault(); pendingWheel += Math.sign(-event.deltaY); requestAnimationFrame(flushMouseMovement);
 }, { passive: false });
 elements.videoShell.addEventListener("contextmenu", (event) => {
-  if (document.pointerLockElement === elements.videoShell) event.preventDefault();
+  if (mouseControlMode !== "off" && !event.target.closest(".zoom-buttons")) event.preventDefault();
 });
+elements.videoShell.addEventListener("mouseleave", () => { fallbackMousePosition = null; });
 elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {
   const button = event.target.closest("button"); if (!button || button.disabled) return;
@@ -275,7 +328,7 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest("#screen-menu") && !event.target.closest("#screen-button")) setScreenMenu(false);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") { setPanel(false); setScreenMenu(false); setMouseMenu(false); setKeyboard(false); }
+  if (event.key === "Escape") { stopMouseControl(); setPanel(false); setScreenMenu(false); setMouseMenu(false); setKeyboard(false); }
 });
 
 setZoom(100); setCursorSize("medium"); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000);

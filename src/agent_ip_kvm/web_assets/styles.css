@@ -81,7 +81,7 @@ button { color: inherit; font: inherit; }
 .mouse-menu select { margin-bottom: 12px; }
 .mouse-message { min-height: 17px; margin: 0 0 9px; color: var(--muted); font-size: 11px; }
 .control-hint { margin: 9px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
-.video-shell.mouse-captured::after {
+.video-shell.mouse-control-active::after {
   content: "鼠标控制中 · Esc 退出";
   position: absolute;
   z-index: 5;

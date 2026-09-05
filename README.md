@@ -147,7 +147,7 @@ sudo sh scripts/install-uvc-power-rule.sh 2b89 5854
 sudo sh scripts/install-uvc-power-rule.sh --remove
 ```
 
-顶部栏显示刷新、鼠标、键盘、屏幕和设置按钮，不显示项目标题或品牌图标。视频区域左下角的两个按钮可把浏览器画面缩放到 50% 至 200%；屏幕菜单只选择采集设备实际支持的 MJPEG 分辨率和刷新率。缩放画面不会移动顶部工具栏或左下角按钮。鼠标菜单可以调整画面内的光标大小；HID 可用时，点击“开始控制”会锁定光标并把相对移动、点击和滚轮发给目标电脑，按 `Esc` 退出。键盘按钮会打开触屏屏幕键盘。
+顶部栏显示刷新、鼠标、键盘、屏幕和设置按钮，不显示项目标题或品牌图标。视频区域左下角的两个按钮可把浏览器画面缩放到 50% 至 200%；屏幕菜单只选择采集设备实际支持的 MJPEG 分辨率和刷新率。缩放画面不会移动顶部工具栏或左下角按钮。鼠标菜单可以调整画面内的光标大小；HID 可用时，点击“开始控制”会优先锁定光标并把相对移动、点击和滚轮发给目标电脑。如果嵌入式浏览器不允许锁定，页面会自动进入仅在视频区域内生效的回退控制模式；按 `Esc` 或点击“停止控制”退出。键盘按钮会打开触屏屏幕键盘。
 
 Linux 上默认使用 `auto` 后端：只有 USB 主机已经配置 Gadget 且键盘、鼠标端点都可写时，页面才会自动启用 HID；断开时会释放输入并恢复为未连接。为 Web 服务账号安装端点权限规则：
 
@@ -168,7 +168,15 @@ PYTHONPATH=src python -m agent_ip_kvm.web \
 
 Linux USB Gadget 后端需要已经存在的 `hid.keyboard` 和 `hid.mouse` ConfigFS 功能；上述持久化服务可以在 RDK X5 上自动建立它们。正式环境开放真实输入前仍需完成认证和单一控制者机制。
 
-RDK X5 已完成一次受保护的真实 Web 键盘验证：开发板通过 Wi-Fi 保持独立管理，QuickLink Type-C 连接目标笔记本；180 秒自动回滚窗口内发送一个小写 `a`，并由 HDMI 回传画面确认字符进入空白记事本。验证后提前回滚，Web HID 恢复默认关闭。
+RDK X5 已完成一次受保护的真实 Web 键盘验证：开发板通过 Wi-Fi 保持独立管理，QuickLink Type-C 连接目标笔记本；180 秒自动回滚窗口内发送一个小写 `a`，并由 HDMI 回传画面确认字符进入空白记事本。验证后提前回滚，Web HID 自动回到断开状态。
+
+在 RDK X5 上安装 Web 开机服务：
+
+```bash
+sudo sh scripts/install-web-service.sh sunrise /home/sunrise/agent-ip-kvm-app
+```
+
+服务监听 `0.0.0.0:8765`，使用 `/dev/video0` 的 1920×1080、30 fps MJPEG，并在异常退出后自动重启。使用 `sudo sh scripts/install-web-service.sh --remove` 可以撤销。RDK X5 已完成实际重启验证，Web 与 HID Gadget 服务均会自动恢复。
 
 ## 计划架构
 
