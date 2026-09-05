@@ -98,7 +98,10 @@ apply_hid() {
         CREATE_KEYBOARD=0
     fi
     if [ -e "$GADGET/functions/$MOUSE_FUNCTION" ] || [ -e "$CONFIG/$MOUSE_FUNCTION" ]; then
-        [ -d "$GADGET/functions/$MOUSE_FUNCTION" ] && [ -L "$CONFIG/$MOUSE_FUNCTION" ] || fail "$MOUSE_FUNCTION is partial"
+        [ -d "$GADGET/functions/$MOUSE_FUNCTION" ] || fail "$MOUSE_FUNCTION is partial"
+        if [ "$INCLUDE_RELATIVE_MOUSE" -eq 1 ]; then
+            [ -L "$CONFIG/$MOUSE_FUNCTION" ] || fail "$MOUSE_FUNCTION is partial"
+        fi
         CREATE_MOUSE=0
     fi
     if [ -e "$GADGET/functions/$POINTER_FUNCTION" ] || [ -e "$CONFIG/$POINTER_FUNCTION" ]; then
