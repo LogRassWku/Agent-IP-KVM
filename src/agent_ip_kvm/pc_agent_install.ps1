@@ -38,8 +38,21 @@ try {
     if (-not (Test-Path $ollama)) { throw 'Ollama 安装完成后未找到 ollama.exe' }
 
     Send-Progress 'downloading_model' 38 "正在下载 $Model，所需时间取决于网络速度"
-    & $ollama pull $Model
-    if ($LASTEXITCODE -ne 0) { throw "模型下载失败，退出代码 $LASTEXITCODE" }
+    $lastPullPercent = -1
+    & $ollama pull $Model 2>&1 | ForEach-Object {
+        $line = $_.ToString()
+        if ($line -match '(?<percent>\d{1,3})%') {
+            $pullPercent = [Math]::Min(100, [int]$Matches['percent'])
+            if ($pullPercent -ne $lastPullPercent) {
+                $lastPullPercent = $pullPercent
+                $taskProgress = 38 + [Math]::Floor($pullPercent * 0.54)
+                Send-Progress 'downloading_model' $taskProgress "正在下载 $Model（$pullPercent%）"
+            }
+        }
+        Write-Output $line
+    }
+    $pullExitCode = $LASTEXITCODE
+    if ($pullExitCode -ne 0) { throw "模型下载失败，退出代码 $pullExitCode" }
 
     Send-Progress 'verifying' 94 '正在校验模型清单'
     $tagsUri = 'http://127.0.0.1:11434/api/tags'
