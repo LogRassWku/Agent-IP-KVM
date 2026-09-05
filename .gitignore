@@ -1,0 +1,21 @@
+# Local development and hardware diagnostics
+work/
+
+# Captured screens may contain private information
+outputs/captures/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Runtime data
+*.log
+data/
+runtime/
