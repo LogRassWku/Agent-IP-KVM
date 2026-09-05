@@ -205,6 +205,16 @@
 - 测试期间没有打开 `/dev/hidg*`，因此没有发送键盘或鼠标报告。USB 重新枚举导致原 SSH 会话重置，符合预期。
 - 45 秒后看门狗自动执行精确回滚。Windows 的 HID 接口消失；开发板只剩 `ecm.0`、`mass_storage.0`、`rndis.0`，`os_desc/c.1` 和 `35300000.usb` 绑定均恢复，Web 状态为 `streaming / available`。
 
+## 2026-09-05：Linux USB Gadget 全零释放报告通过
+
+- 实现 Linux USB Gadget HID 输出后端，支持标准键盘、五键相对鼠标、全部释放、紧急停止和重新启用生命周期。
+- 后端读取 ConfigFS HID 功能的主／次设备号，并据此匹配 `/dev/hidg*`，不硬编码键盘和鼠标的节点序号。
+- 独立验证命令必须显式传入 `--release-only`，当前没有暴露发送有效按键、点击或移动的命令行入口。
+- 第一次写入在 USB 重新绑定后立即执行，主机尚未完成接口配置，内核对两个端点均返回 `Errno 108`；程序没有发出有效动作，自动回滚正常完成。
+- 加入 2.5 秒主机配置等待后再次实测成功：键盘 `/dev/hidg0` 写入 `0000000000000000`，鼠标 `/dev/hidg1` 写入 `00000000`，结果明确记录 `active_input_sent: false`。
+- Windows 同时识别并启动项目 HID 键盘与鼠标。45 秒后看门狗移除两个接口，开发板恢复 `ecm.0`、`mass_storage.0`、`rndis.0`、原 OS Descriptor 链接和 `35300000.usb` 绑定；Web 继续为 `streaming / available`。
+- 新增五项 Linux HID 输出测试后，项目自动测试总数为三十项，全部通过。
+
 ## 下一条记录
 
 发生以下任一事件时追加记录：
