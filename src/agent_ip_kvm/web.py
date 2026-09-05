@@ -120,6 +120,8 @@ class StreamProvider(Protocol):
 
     def status(self) -> dict[str, object]: ...
 
+    def pause(self) -> None: ...
+
     def close(self) -> None: ...
 
 
@@ -550,6 +552,27 @@ class VideoStreamController:
         if thread is not None:
             thread.join(timeout=3)
 
+    def pause(self) -> None:
+        """Stop capture and release buffered frames while keeping the controller reusable."""
+        self._stop_event.set()
+        with self._condition:
+            self._condition.notify_all()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=3)
+            if thread.is_alive():
+                raise VideoSourceError("video source did not stop while entering Agent mode")
+        with self._condition:
+            self._thread = None
+            self._generation += 1
+            self._sequence = -1
+            self._jpeg = None
+            self._state = "idle"
+            self._message = "Agent 模式已释放视频采集"
+            self._error = None
+            self._stop_event.clear()
+            self._condition.notify_all()
+
     def update_mode(self, width: int, height: int, fps: float) -> None:
         self._stop_event.set()
         with self._condition:
@@ -672,6 +695,7 @@ def create_handler(
             path = urlsplit(self.path).path
             if path not in {
                 "/api/video-settings",
+                "/api/video/pause",
                 "/api/hid/key",
                 "/api/hid/mouse-move",
                 "/api/hid/mouse-position",
@@ -701,7 +725,9 @@ def create_handler(
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = 0
-            if length < 0 or length > 4096 or (length == 0 and path != "/api/hid/release"):
+            if length < 0 or length > 4096 or (
+                length == 0 and path not in {"/api/hid/release", "/api/video/pause"}
+            ):
                 self._send_json({"error": "invalid request body"}, HTTPStatus.BAD_REQUEST)
                 return
             try:
@@ -713,6 +739,12 @@ def create_handler(
                         self.send_error(HTTPStatus.NOT_FOUND)
                         return
                     result = {"video": settings_updater(payload)}
+                elif path == "/api/video/pause":
+                    pause = getattr(stream, "pause", None)
+                    if not callable(pause):
+                        raise VideoSourceError("video stream cannot be paused")
+                    pause()
+                    result = {"video": stream.status()}
                 elif path == "/api/hid/key":
                     result = {"hid": hid.tap_key(payload)}
                 elif path == "/api/hid/mouse-move":

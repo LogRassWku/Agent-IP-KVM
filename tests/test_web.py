@@ -381,6 +381,21 @@ class WebInterfaceTests(unittest.TestCase):
         self.assertEqual(list(controller.frames()), [(0, b"\xff\xd8frame\xff\xd9")])
         self.assertEqual(controller.status()["state"], "ended")
 
+    def test_stream_controller_pause_discards_frame_and_can_restart(self) -> None:
+        controller = VideoStreamController(
+            WebConfig(),
+            source_factory=lambda config: FiniteSource(),
+            encoder_factory=PassthroughEncoder,
+        )
+        self.assertEqual(next(controller.frames()), (0, b"\xff\xd8frame\xff\xd9"))
+
+        controller.pause()
+
+        self.assertEqual(controller.status()["state"], "idle")
+        self.assertIsNone(controller.status()["sequence"])
+        self.assertEqual(list(controller.frames()), [(0, b"\xff\xd8frame\xff\xd9")])
+        controller.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,7 @@ let pendingPointer = null;
 let pendingWheel = 0;
 let pointerRequestActive = false;
 let agentMode = false;
+let videoPauseRequest = Promise.resolve();
 const agentStorageKey = "agent-ip-kvm.sessions.v1";
 const agentModelStorageKey = "agent-ip-kvm.model.v1";
 const agentModelNames = {
@@ -143,8 +144,31 @@ function updateStatus(payload) {
 }
 
 function connectStream() {
+  if (agentMode) return;
   elements.videoFrame.classList.remove("visible"); elements.noSignal.hidden = false;
   elements.videoFrame.src = `/api/stream.mjpg?t=${Date.now()}`;
+}
+
+function disconnectStream() {
+  elements.videoFrame.classList.remove("visible");
+  elements.videoFrame.removeAttribute("src");
+  elements.noSignal.hidden = false;
+}
+
+function requestVideoPause() {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", "/api/video/pause", true);
+    request.setRequestHeader("Content-Type", "application/json");
+    request.timeout = 8000;
+    request.addEventListener("load", () => {
+      if (request.status >= 200 && request.status < 300) resolve();
+      else reject(new Error(`HTTP ${request.status}`));
+    });
+    request.addEventListener("error", () => reject(new Error("video pause request failed")));
+    request.addEventListener("timeout", () => reject(new Error("video pause request timed out")));
+    request.send("{}");
+  });
 }
 
 async function refreshStatus() {
@@ -185,11 +209,20 @@ function setAgentMode(open) {
   elements.videoShell.setAttribute("aria-hidden", String(agentMode));
   elements.tools.setAttribute("aria-hidden", String(agentMode));
   if (agentMode) {
+    disconnectStream();
+    videoPauseRequest = requestVideoPause().catch((error) => {
+      console.warn("Unable to release video capture", error);
+    });
     setPanel(false);
     setScreenMenu(false);
     setMouseMenu(false);
     setKeyboard(false);
     elements.agentInput.focus({ preventScroll: true });
+  } else {
+    const pendingPause = videoPauseRequest;
+    pendingPause.finally(() => {
+      if (!agentMode) connectStream();
+    });
   }
 }
 
