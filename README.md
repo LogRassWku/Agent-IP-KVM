@@ -67,7 +67,7 @@ PYTHONPATH=src python -m agent_ip_kvm.web \
   --source synthetic
 ```
 
-使用视频文件源时增加 `--source file --file /path/to/video.mp4`。服务默认只监听本机；在受信的管理网络上访问时，显式指定该网络接口的地址。当前页面提供状态和设备信息，连续视频画面将在下一步接入。
+使用视频文件源时增加 `--source file --file /path/to/video.mp4`。服务默认只监听本机；在受信的管理网络上访问时，显式指定该网络接口的地址。页面通过 MJPEG 持续显示画面；视频结束、源断开或编码失败时切换为 `No Signal`，点击刷新按钮可以重新连接视频流。
 
 ## 计划架构
 

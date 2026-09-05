@@ -63,6 +63,18 @@ button { color: inherit; font: inherit; }
   background: #05070b;
 }
 
+.video-frame {
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.video-frame.visible { display: block; }
+
+.no-signal[hidden] { display: none; }
+
 .no-signal {
   gap: 10px;
   color: #a8b1bf;

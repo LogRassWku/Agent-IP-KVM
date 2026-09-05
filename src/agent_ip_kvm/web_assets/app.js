@@ -1,5 +1,6 @@
 const elements = {
   noSignal: document.querySelector("#no-signal"),
+  videoFrame: document.querySelector("#video-frame"),
   panel: document.querySelector("#settings-panel"),
   backdrop: document.querySelector("#panel-backdrop"),
   settingsButton: document.querySelector("#settings-button"),
@@ -45,8 +46,12 @@ function updateDevices(v4l2) {
 
 function updateStatus(payload) {
   const source = payload.source;
-  const available = source?.health === "available";
+  const stream = payload.stream;
+  const available = source?.health === "available" && stream?.state !== "error" && stream?.state !== "ended";
   elements.noSignal.classList.toggle("unavailable", !available);
+  const hasFrame = stream?.state === "streaming" && Number.isInteger(stream?.sequence);
+  elements.videoFrame.classList.toggle("visible", hasFrame);
+  elements.noSignal.hidden = hasFrame;
 
   text("info-backend", source?.backend);
   text("info-source", source?.source_id);
@@ -56,6 +61,12 @@ function updateStatus(payload) {
   text("info-fps", modeLabel(source?.capabilities, "fps"));
   text("info-error", source?.error || "无");
   updateDevices(payload.v4l2);
+}
+
+function connectStream() {
+  elements.videoFrame.classList.remove("visible");
+  elements.noSignal.hidden = false;
+  elements.videoFrame.src = `/api/stream.mjpg?t=${Date.now()}`;
 }
 
 async function refreshStatus() {
@@ -79,7 +90,19 @@ function setPanel(open) {
 elements.settingsButton.addEventListener("click", () => setPanel(true));
 elements.closeSettings.addEventListener("click", () => setPanel(false));
 elements.backdrop.addEventListener("click", () => setPanel(false));
-elements.refreshButton.addEventListener("click", refreshStatus);
+elements.refreshButton.addEventListener("click", () => {
+  connectStream();
+  refreshStatus();
+});
+elements.videoFrame.addEventListener("load", () => {
+  elements.videoFrame.classList.add("visible");
+  elements.noSignal.hidden = true;
+});
+elements.videoFrame.addEventListener("error", () => {
+  elements.videoFrame.classList.remove("visible");
+  elements.noSignal.hidden = false;
+  refreshStatus();
+});
 elements.fullscreenButton.addEventListener("click", async () => {
   if (document.fullscreenElement) await document.exitFullscreen();
   else await elements.videoShell.requestFullscreen();
@@ -88,5 +111,6 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setPanel(false);
 });
 
+connectStream();
 refreshStatus();
 setInterval(refreshStatus, 5000);
