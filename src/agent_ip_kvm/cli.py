@@ -7,14 +7,50 @@ import json
 import sys
 import time
 
-from .video import SyntheticVideoSource, VideoSourceError
+from .video import SyntheticVideoSource, VideoSourceError, discover_v4l2_devices
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-ip-kvm-video")
     parser.add_argument("--source", choices=("synthetic",), default="synthetic")
     parser.add_argument("--frames", type=int, default=30)
+    parser.add_argument(
+        "--discover-v4l2",
+        action="store_true",
+        help="list Linux V4L2 devices and formats without capturing frames",
+    )
     return parser
+
+
+def discover() -> dict[str, object]:
+    report = discover_v4l2_devices()
+    return {
+        "status": report.status.value,
+        "backend": "v4l2",
+        "message": report.message,
+        "devices": [
+            {
+                "source_id": device.source_id,
+                "device_path": device.device_path,
+                "display_name": device.display_name,
+                "driver": device.driver,
+                "bus_info": device.bus_info,
+                "node_kind": device.node_kind.value,
+                "supports_video_capture": device.supports_video_capture,
+                "capabilities": [
+                    {
+                        "width": capability.width,
+                        "height": capability.height,
+                        "fps": capability.fps,
+                        "pixel_format": capability.pixel_format,
+                    }
+                    for capability in device.capabilities
+                ],
+                "error": device.error,
+            }
+            for device in report.devices
+        ],
+    }
 
 
 def run(frames: int) -> dict[str, object]:
@@ -58,6 +94,9 @@ def run(frames: int) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.discover_v4l2:
+        print(json.dumps(discover(), ensure_ascii=False, indent=2))
+        return 0
     try:
         result = run(args.frames)
     except (ValueError, VideoSourceError) as exc:
@@ -69,4 +108,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
