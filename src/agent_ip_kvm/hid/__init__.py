@@ -10,6 +10,11 @@ from .config_plan import (
     build_composite_gadget_plan,
 )
 from .descriptors import BOOT_KEYBOARD_REPORT_DESCRIPTOR, RELATIVE_MOUSE_REPORT_DESCRIPTOR
+from .linux_gadget import (
+    LinuxGadgetHidAdapter,
+    resolve_hidg_path,
+    wait_for_hidg_path,
+)
 
 from .probe import (
     GadgetInfo,
@@ -33,6 +38,7 @@ __all__ = [
     "HidProbeStatus",
     "HidState",
     "HidStoppedError",
+    "LinuxGadgetHidAdapter",
     "MouseButton",
     "KEYBOARD_FUNCTION",
     "MOUSE_FUNCTION",
@@ -45,5 +51,7 @@ __all__ = [
     "UdcInfo",
     "build_composite_gadget_plan",
     "probe_usb_hid",
+    "resolve_hidg_path",
+    "wait_for_hidg_path",
     "write_recovery_bundle",
 ]
