@@ -37,6 +37,8 @@ RDK X5、树莓派及其他 Linux 开发板
 ## 文档
 
 - [项目计划](outputs/IP_KVM_项目计划.md)
+- [需求文档](docs/REQUIREMENTS.md)
+- [项目历史](docs/HISTORY.md)
 
 ## 开源许可
 
