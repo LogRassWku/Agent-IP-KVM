@@ -42,6 +42,20 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "模型下载失败，退出代码 $LASTEXITCODE" }
 
     Send-Progress 'verifying' 94 '正在校验模型清单'
+    $tagsUri = 'http://127.0.0.1:11434/api/tags'
+    try {
+        Invoke-RestMethod -Uri $tagsUri -Method Get -TimeoutSec 5 | Out-Null
+    } catch {
+        # The Windows installer normally starts Ollama. If it did not, start a
+        # private background daemon so the local API and model are usable.
+        Start-Process -FilePath $ollama -ArgumentList 'serve' -WindowStyle Hidden | Out-Null
+        $ready = $false
+        for ($attempt = 0; $attempt -lt 10; $attempt++) {
+            Start-Sleep -Seconds 1
+            try { Invoke-RestMethod -Uri $tagsUri -Method Get -TimeoutSec 3 | Out-Null; $ready = $true; break } catch { }
+        }
+        if (-not $ready) { throw 'Ollama 本地 API 未能启动' }
+    }
     $models = (& $ollama list | Out-String)
     if ($LASTEXITCODE -ne 0 -or $models -notmatch [regex]::Escape(($Model -split ':')[0])) {
         throw '模型下载后校验失败'

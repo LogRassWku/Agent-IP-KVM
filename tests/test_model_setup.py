@@ -36,6 +36,8 @@ class ModelSetupStoreTests(unittest.TestCase):
         ).decode("utf-8")
         self.assertIn("qwen3.5:9b", script)
         self.assertIn("https://ollama.com/install.ps1", script)
+        self.assertIn("http://127.0.0.1:11434/api/tags", script)
+        self.assertIn("Start-Process -FilePath $ollama -ArgumentList 'serve'", script)
         self.assertIn("t" * 64, script)
         restored = ModelSetupStore(self.store.path)
         self.assertEqual(restored.get(created["task_id"])["model"], "qwen3.5:9b")
