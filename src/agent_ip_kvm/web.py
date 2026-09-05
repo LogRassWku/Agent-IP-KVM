@@ -845,6 +845,7 @@ def create_handler(
                     "pairing_enabled": peer_auth.enabled,
                     **pc_agent.status(),
                 }
+                payload["model_setup"] = {"latest": model_setup.latest()}
                 self._send_json(payload)
                 return
             if path == "/api/video/snapshot.jpg":

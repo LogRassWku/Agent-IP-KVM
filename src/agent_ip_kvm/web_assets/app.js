@@ -660,7 +660,7 @@ async function openPcAgentSetup() {
   const preferred = locations.find((item) => item.drive === "D:") ?? locations[0];
   const session = makeAgentSession();
   session.title = "配置 PC Agent 模型";
-  const task = latest.task && !["failed"].includes(latest.task.status) ? latest.task : null;
+  const task = latest.task && !["completed", "failed"].includes(latest.task.status) ? latest.task : null;
   session.messages.push({
     id: newSessionId(), role: "assistant", content: task ? "已找到最近的模型配置任务。" : "请选择模型和安装位置。",
     createdAt: Date.now(), modelSetup: {
