@@ -71,6 +71,23 @@ button { color: inherit; font: inherit; }
 .agent-mode-button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 body.agent-mode .agent-mode-button { left: calc(100% - 130px); }
 body.agent-mode .tools { opacity: 0; visibility: hidden; transform: translateX(28px); pointer-events: none; }
+.agent-topbar-title {
+  position: absolute;
+  left: 50%;
+  max-width: calc(100% - 300px);
+  margin: 0;
+  overflow: hidden;
+  color: #e8edf4;
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -5px);
+  transition: opacity 180ms ease, transform 260ms ease, visibility 0s linear 260ms;
+}
+body.agent-mode .agent-topbar-title { opacity: 1; visibility: visible; transform: translate(-50%, 0); transition-delay: 150ms; }
 
 .tool-button, .icon-button {
   border: 1px solid transparent;
@@ -192,10 +209,22 @@ body.agent-mode .agent-shell { transform: translateX(0); }
   background: #0c111a;
 }
 .agent-sidebar-header { padding: 0 4px 16px; }
-.agent-brand { display: flex; align-items: center; gap: 11px; padding: 2px 5px 18px; }
-.agent-brand > div { display: grid; gap: 2px; min-width: 0; }
-.agent-brand strong { color: #edf2f8; font-size: 14px; }
-.agent-brand span:not(.agent-orb) { color: var(--muted); font-size: 11px; }
+.model-selector { display: grid; gap: 6px; padding: 1px 3px 16px; color: #758194; font-size: 10px; font-weight: 700; letter-spacing: .06em; }
+.model-selector select {
+  width: 100%;
+  height: 42px;
+  padding: 0 32px 0 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 9px;
+  outline: none;
+  color: #e3eaf2;
+  background: #151c28;
+  cursor: pointer;
+  font: 12px/1 inherit;
+  text-overflow: ellipsis;
+}
+.model-selector select:hover, .model-selector select:focus-visible { border-color: rgba(105,224,163,.42); background: #192230; }
 .agent-chat {
   display: flex;
   flex: 1 1 auto;
@@ -263,31 +292,15 @@ body.agent-mode .agent-shell { transform: translateX(0); }
 .session-action:hover, .session-action:focus-visible { color: #e8edf4; background: #202938; outline: none; }
 .session-action.delete:hover { color: #ff9299; }
 .agent-storage-hint { margin: 12px 9px 2px; color: #596577; font-size: 10px; }
-.agent-chat-header {
-  display: flex;
-  flex: 0 0 65px;
-  align-items: center;
-  gap: 12px;
-  padding: 0 24px;
-  border-bottom: 1px solid rgba(255,255,255,.07);
-  background: rgba(9,13,20,.82);
-}
-.agent-chat-header h1 { max-width: 65vw; margin: 0 0 2px; overflow: hidden; color: #e8edf4; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.agent-chat-header span { color: #697587; font-size: 10px; }
-.sidebar-toggle { display: none; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 9px; color: #aeb8c7; background: transparent; cursor: pointer; }
+.sidebar-toggle { position: absolute; z-index: 4; left: 10px; display: none; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 9px; color: #aeb8c7; background: transparent; cursor: pointer; }
 .agent-conversation {
   flex: 1 1 auto;
   width: min(800px, calc(100% - 40px));
   min-height: 0;
   margin: 0 auto;
-  padding: 34px 8px 18px;
+  padding: 26px 8px 18px;
   overflow-y: auto;
 }
-.agent-empty { display: grid; place-items: center; min-height: 100%; padding: 50px 16px 100px; text-align: center; }
-.agent-empty .agent-orb { width: 52px; height: 52px; margin-bottom: 17px; border-radius: 17px; }
-.agent-empty .agent-orb svg { width: 27px; height: 27px; }
-.agent-empty h2 { margin: 0 0 8px; color: #edf2f8; font-size: clamp(21px, 3vw, 30px); font-weight: 650; letter-spacing: -.02em; }
-.agent-empty p { max-width: 470px; margin: 0; color: #8490a2; font-size: 12px; line-height: 1.7; }
 .agent-message { display: flex; align-items: flex-start; gap: 12px; max-width: 84%; margin-bottom: 22px; }
 .agent-message:last-child { margin-bottom: 0; }
 .message-avatar {
@@ -307,7 +320,7 @@ body.agent-mode .agent-shell { transform: translateX(0); }
 .user-message { margin-left: auto; justify-content: flex-end; }
 .user-message > div { padding: 11px 14px; border-radius: 15px 15px 4px 15px; background: rgba(105, 224, 163, .14); }
 .user-message strong { color: var(--accent); }
-.agent-input-area { flex: 0 0 auto; width: min(800px, calc(100% - 40px)); margin: 0 auto; padding-bottom: 10px; }
+.agent-input-area { flex: 0 0 auto; width: min(800px, calc(100% - 40px)); margin: 0 auto; padding: 0 0 18px; }
 .agent-suggestions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 2px 10px; }
 .agent-suggestions button {
   min-height: 32px;
@@ -326,7 +339,7 @@ body.agent-mode .agent-shell { transform: translateX(0); }
   gap: 10px;
   padding: 10px 10px 10px 16px;
   border: 1px solid rgba(255, 255, 255, .13);
-  border-radius: 18px;
+  border-radius: 4px;
   background: #111722;
   box-shadow: 0 16px 44px rgba(0, 0, 0, .26);
 }
@@ -351,7 +364,7 @@ body.agent-mode .agent-shell { transform: translateX(0); }
   width: 38px;
   height: 38px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 4px;
   color: #07120d;
   background: var(--accent);
   cursor: pointer;
@@ -503,8 +516,8 @@ body.agent-mode .agent-shell { transform: translateX(0); }
   .agent-sidebar { position: absolute; z-index: 5; inset: 0 auto 0 0; width: min(82vw, 290px); transform: translateX(-100%); box-shadow: 18px 0 50px rgba(0,0,0,.35); transition: transform 220ms ease; }
   .agent-app.sidebar-open .agent-sidebar { transform: translateX(0); }
   .agent-app.sidebar-open::after { content: ""; position: absolute; z-index: 4; inset: 0; background: rgba(0,0,0,.48); }
-  .sidebar-toggle { display: grid; }
-  .agent-chat-header { padding: 0 14px; }
+  body.agent-mode .sidebar-toggle { display: grid; }
+  .agent-topbar-title { max-width: calc(100% - 230px); font-size: 12px; }
   .agent-conversation, .agent-input-area { width: calc(100% - 20px); }
   .agent-conversation { padding: 22px 5px 12px; }
   .agent-message { max-width: 94%; }

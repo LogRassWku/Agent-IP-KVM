@@ -17,7 +17,7 @@ const elements = {
   agentModeButton: document.querySelector("#agent-mode-button"), agentShell: document.querySelector("#agent-shell"),
   agentComposer: document.querySelector("#agent-composer"), agentInput: document.querySelector("#agent-input"),
   agentSend: document.querySelector("#agent-send"), agentConversation: document.querySelector("#agent-conversation"),
-  agentSuggestions: document.querySelector(".agent-suggestions"), tools: document.querySelector(".tools"),
+  tools: document.querySelector(".tools"), agentModelSelect: document.querySelector("#agent-model-select"),
   agentApp: document.querySelector(".agent-app"), agentSidebar: document.querySelector("#agent-sidebar"),
   agentSidebarToggle: document.querySelector("#agent-sidebar-toggle"), newAgentChat: document.querySelector("#new-agent-chat"),
   agentSessionList: document.querySelector("#agent-session-list"), agentChatTitle: document.querySelector("#agent-chat-title"),
@@ -34,6 +34,7 @@ let pendingWheel = 0;
 let pointerRequestActive = false;
 let agentMode = false;
 const agentStorageKey = "agent-ip-kvm.sessions.v1";
+const agentModelStorageKey = "agent-ip-kvm.model.v1";
 let agentSessions = [];
 let activeAgentSessionId = "";
 
@@ -213,6 +214,13 @@ function loadAgentSessions() {
   saveAgentSessions();
 }
 
+function loadAgentModel() {
+  try {
+    const saved = localStorage.getItem(agentModelStorageKey);
+    if ([...elements.agentModelSelect.options].some((option) => option.value === saved)) elements.agentModelSelect.value = saved;
+  } catch (_) { /* Keep the default model if local storage is unavailable. */ }
+}
+
 function activeAgentSession() {
   return agentSessions.find((session) => session.id === activeAgentSessionId) ?? agentSessions[0];
 }
@@ -279,13 +287,7 @@ function renderAgentConversation() {
   const session = activeAgentSession();
   elements.agentChatTitle.textContent = session.title;
   elements.agentConversation.replaceChildren();
-  if (session.messages.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "agent-empty";
-    empty.innerHTML = '<div><span class="agent-orb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 13.8 8l4.7 1.8-4.7 1.8L12 16l-1.8-4.4-4.7-1.8L10.2 8 12 3.5Z"/><path d="m18.3 15 .8 2.1 2.2.9-2.2.8-.8 2.2-.9-2.2-2.1-.8 2.1-.9.9-2.1Z"/></svg></span><h2>需要我做什么？</h2><p>描述你想在目标电脑上完成的任务。Agent 可以观察屏幕、规划步骤，并在执行敏感操作前请求你的允许。</p></div>';
-    elements.agentConversation.append(empty);
-    return;
-  }
+  if (session.messages.length === 0) return;
   for (const message of session.messages) elements.agentConversation.append(renderAgentMessage(message));
   elements.agentConversation.scrollTop = elements.agentConversation.scrollHeight;
 }
@@ -515,9 +517,8 @@ elements.agentComposer.addEventListener("submit", (event) => {
   event.preventDefault();
   submitAgentPrompt(elements.agentInput.value);
 });
-elements.agentSuggestions.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-agent-prompt]");
-  if (button) submitAgentPrompt(button.dataset.agentPrompt);
+elements.agentModelSelect.addEventListener("change", () => {
+  try { localStorage.setItem(agentModelStorageKey, elements.agentModelSelect.value); } catch (_) { /* UI selection still works. */ }
 });
 elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {
@@ -550,5 +551,5 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-loadAgentSessions(); renderAgentSessions(); renderAgentConversation();
+loadAgentSessions(); loadAgentModel(); renderAgentSessions(); renderAgentConversation();
 setZoom(100); setCursorSize("medium"); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000);

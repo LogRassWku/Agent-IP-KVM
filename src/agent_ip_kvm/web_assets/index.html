@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <title>Agent IP KVM</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/styles.css?v=20260906-2">
   </head>
   <body>
     <header class="topbar" id="topbar">
@@ -13,6 +13,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.8 8l4.7 1.8-4.7 1.8L12 16l-1.8-4.4-4.7-1.8L10.2 8 12 3.5Z"/><path d="m18.3 15 .8 2.1 2.2.9-2.2.8-.8 2.2-.9-2.2-2.1-.8 2.1-.9.9-2.1Z"/></svg>
         <span>Agent</span>
       </button>
+      <button class="sidebar-toggle" id="agent-sidebar-toggle" type="button" aria-expanded="false" aria-controls="agent-sidebar" title="显示会话列表">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <h1 class="agent-topbar-title" id="agent-chat-title">新会话</h1>
       <nav class="tools" aria-label="视频工具栏">
         <button class="tool-button" id="refresh-button" type="button" title="刷新状态">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 9m0 0V4m0 5h5M4 13a8.1 8.1 0 0 0 14.9 4L21 15m0 0v5m0-5h-5"/></svg>
@@ -64,12 +68,14 @@
         <div class="agent-app">
           <aside class="agent-sidebar" id="agent-sidebar" aria-label="Agent 会话">
             <div class="agent-sidebar-header">
-              <div class="agent-brand">
-                <span class="agent-orb" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M12 3.5 13.8 8l4.7 1.8-4.7 1.8L12 16l-1.8-4.4-4.7-1.8L10.2 8 12 3.5Z"/><path d="m18.3 15 .8 2.1 2.2.9-2.2.8-.8 2.2-.9-2.2-2.1-.8 2.1-.9.9-2.1Z"/></svg>
-                </span>
-                <div><strong>Agent</strong><span>本地控制助手</span></div>
-              </div>
+              <label class="model-selector" for="agent-model-select">
+                <span>模型</span>
+                <select id="agent-model-select" aria-label="选择 Agent 模型">
+                  <option value="qwen2.5-1.5b">Qwen2.5 1.5B · 板载</option>
+                  <option value="pc-agent">PC Agent · 自动选择</option>
+                  <option value="remote-api">远程 API · 未配置</option>
+                </select>
+              </label>
               <button class="new-chat-button" id="new-agent-chat" type="button">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                 <span>新建会话</span>
@@ -83,31 +89,15 @@
           </aside>
 
           <section class="agent-chat" aria-label="当前对话">
-            <header class="agent-chat-header">
-              <button class="sidebar-toggle" id="agent-sidebar-toggle" type="button" aria-expanded="false" aria-controls="agent-sidebar" title="显示会话列表">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-              </button>
-              <div>
-                <h1 id="agent-chat-title">新会话</h1>
-                <span>Agent 执行接口尚未连接</span>
-              </div>
-            </header>
-
             <div class="agent-conversation" id="agent-conversation" aria-live="polite"></div>
 
             <div class="agent-input-area">
-              <div class="agent-suggestions" aria-label="快捷指令">
-                <button type="button" data-agent-prompt="检查当前电脑的状态">检查电脑状态</button>
-                <button type="button" data-agent-prompt="分析屏幕上正在显示的错误">分析屏幕错误</button>
-                <button type="button" data-agent-prompt="帮我规划系统镜像安装步骤">规划镜像安装</button>
-              </div>
               <form class="agent-composer" id="agent-composer">
                 <textarea id="agent-input" rows="1" maxlength="2000" placeholder="向 Agent 描述任务…" aria-label="向 Agent 描述任务"></textarea>
                 <button id="agent-send" type="submit" title="发送" aria-label="发送消息">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14"/></svg>
                 </button>
               </form>
-              <p class="agent-disclaimer">涉及安装、BIOS 或系统修改时，Agent 会先说明操作并等待允许。</p>
             </div>
           </section>
         </div>
@@ -196,6 +186,6 @@
       </section>
     </aside>
 
-    <script src="/app.js"></script>
+    <script src="/app.js?v=20260906-2"></script>
   </body>
 </html>

@@ -95,6 +95,8 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertIn('id="new-agent-chat"', page)
             self.assertIn('id="agent-session-list"', page)
             self.assertIn('id="agent-chat-title"', page)
+            self.assertIn('id="agent-model-select"', page)
+            self.assertNotIn('class="agent-suggestions"', page)
             self.assertIn('id="mouse-button"', page)
             self.assertIn('id="keyboard-button"', page)
             self.assertIn('id="screen-button"', page)
