@@ -4,6 +4,8 @@ const elements = {
   backdrop: document.querySelector("#panel-backdrop"), settingsButton: document.querySelector("#settings-button"),
   closeSettings: document.querySelector("#close-settings"), refreshButton: document.querySelector("#refresh-button"),
   screenButton: document.querySelector("#screen-button"), screenMenu: document.querySelector("#screen-menu"),
+  powerButton: document.querySelector("#power-button"), powerMenu: document.querySelector("#power-menu"),
+  powerMessage: document.querySelector("#power-message"), powerAction: document.querySelector("#power-action"),
   resolutionSelect: document.querySelector("#resolution-select"), refreshRateSelect: document.querySelector("#refresh-rate-select"),
   screenMessage: document.querySelector("#screen-message"), applyScreenSettings: document.querySelector("#apply-screen-settings"),
   zoomOut: document.querySelector("#zoom-out"), zoomIn: document.querySelector("#zoom-in"),
@@ -250,7 +252,15 @@ function updateStatus(payload) {
   text("info-format", modeLabel(source?.capabilities, "format"));
   text("info-resolution", modeLabel(source?.capabilities, "resolution")); text("info-fps", modeLabel(source?.capabilities, "fps"));
   text("info-error", source?.error || "无"); updateDevices(payload.v4l2); updateHidStatus(payload.hid); updateHostInfo(payload.controlled_host);
+  updatePowerStatus(payload.power);
   if (elements.screenMenu.hidden) updateScreenOptions(payload);
+}
+
+function updatePowerStatus(power) {
+  const available = Boolean(power?.available);
+  elements.powerAction.disabled = !available;
+  elements.powerMessage.textContent = power?.message || (available ? "可发送唤醒信号" : "未配置电源控制");
+  elements.powerMessage.classList.toggle("available", available);
 }
 
 function connectStream() {
@@ -295,6 +305,11 @@ function setPanel(open) {
 function setScreenMenu(open) {
   elements.screenMenu.hidden = !open; elements.screenButton.setAttribute("aria-expanded", String(open));
   if (open) { setKeyboard(false); setPanel(false); }
+}
+function setPowerMenu(open) {
+  elements.powerMenu.hidden = !open;
+  elements.powerButton.setAttribute("aria-expanded", String(open));
+  if (open) { setScreenMenu(false); setKeyboard(false); setPanel(false); }
 }
 function setKeyboard(open) {
   elements.keyboard.hidden = !open; elements.keyboardButton.setAttribute("aria-expanded", String(open));
@@ -1013,6 +1028,19 @@ elements.refreshButton.addEventListener("click", () => { connectStream(); refres
 elements.videoFrame.addEventListener("load", () => { elements.videoFrame.classList.add("visible"); elements.noSignal.hidden = true; });
 elements.videoFrame.addEventListener("error", () => { elements.videoFrame.classList.remove("visible"); elements.noSignal.hidden = false; refreshStatus(); });
 elements.screenButton.addEventListener("click", () => setScreenMenu(elements.screenMenu.hidden));
+elements.powerButton.addEventListener("click", () => setPowerMenu(elements.powerMenu.hidden));
+elements.powerAction.addEventListener("click", async () => {
+  elements.powerAction.disabled = true;
+  elements.powerMessage.textContent = "正在发送唤醒信号";
+  try {
+    await postJson("/api/power", { action: "wake" });
+    elements.powerMessage.textContent = "唤醒信号已发送";
+  } catch (error) {
+    elements.powerMessage.textContent = error.message;
+  } finally {
+    await refreshStatus();
+  }
+});
 elements.keyboardButton.addEventListener("click", () => setKeyboard(elements.keyboard.hidden));
 elements.closeKeyboard.addEventListener("click", () => setKeyboard(false));
 elements.zoomOut.addEventListener("click", () => setZoom(zoomPercent - 10));
@@ -1112,6 +1140,7 @@ elements.applyScreenSettings.addEventListener("click", async () => {
 });
 document.addEventListener("click", (event) => {
   if (!event.target.closest("#screen-menu") && !event.target.closest("#screen-button")) setScreenMenu(false);
+  if (!event.target.closest("#power-menu") && !event.target.closest("#power-button")) setPowerMenu(false);
   if (!event.target.closest("#agent-model-picker")) setAgentModelMenu(false);
   if (elements.agentApp.classList.contains("sidebar-open") && !event.target.closest("#agent-sidebar") && !event.target.closest("#agent-sidebar-toggle")) {
     elements.agentApp.classList.remove("sidebar-open");
@@ -1121,7 +1150,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (agentMode) setAgentMode(false);
-    else { setPanel(false); setScreenMenu(false); setKeyboard(false); }
+    else { setPanel(false); setScreenMenu(false); setPowerMenu(false); setKeyboard(false); }
   }
 });
 

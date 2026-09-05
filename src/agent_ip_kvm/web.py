@@ -135,6 +135,11 @@ def collect_status(config: WebConfig) -> dict[str, object]:
             "message": report.message,
             "devices": devices,
         },
+        "power": {
+            "available": False,
+            "mode": "unconfigured",
+            "message": "未连接主板 ATX PWR_SW/GPIO 控制线，当前只能显示入口",
+        },
     }
 
 
@@ -896,6 +901,11 @@ def create_handler(
                 }
                 payload["model_setup"] = {"latest": model_setup.latest()}
                 payload["remote_model"] = remote_model.public()
+                payload["power"] = {
+                    "available": False,
+                    "mode": "unconfigured",
+                    "message": "未连接主板 ATX PWR_SW/GPIO 控制线，当前只能显示入口",
+                }
                 self._send_json(payload)
                 return
             if path == "/api/video/snapshot.jpg":
@@ -961,6 +971,7 @@ def create_handler(
             if path not in {
                 "/api/video-settings",
                 "/api/video/pause",
+                "/api/power",
                 "/api/host-info",
                 "/api/hid/key",
                 "/api/hid/mouse-move",
@@ -1034,6 +1045,13 @@ def create_handler(
                         raise VideoSourceError("video stream cannot be paused")
                     pause()
                     result = {"video": stream.status()}
+                elif path == "/api/power":
+                    audit.record("power_request_rejected", action=payload.get("action", "wake"), reason="power_control_unconfigured")
+                    self._send_json(
+                        {"error": "未配置电源控制线：请连接主板 ATX PWR_SW/GPIO，当前无法远程开机"},
+                        HTTPStatus.NOT_IMPLEMENTED,
+                    )
+                    return
                 elif path == "/api/hid/key":
                     result = {"hid": hid.tap_key(payload)}
                 elif path == "/api/hid/mouse-move":

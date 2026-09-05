@@ -40,6 +40,17 @@
             <button class="apply-button" id="apply-screen-settings" type="button">应用</button>
           </section>
         </div>
+        <div class="tool-menu">
+          <button class="tool-button" id="power-button" type="button" title="开机控制" aria-expanded="false" aria-controls="power-menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8"/><path d="M7.1 5.9a8 8 0 1 0 9.8 0"/></svg>
+            <span>开机</span>
+          </button>
+          <section class="popover-menu power-menu" id="power-menu" aria-label="开机控制" hidden>
+            <strong class="popover-title">开机控制</strong>
+            <p class="power-message" id="power-message" aria-live="polite">正在检查电源控制能力</p>
+            <button class="apply-button" id="power-action" type="button" disabled>发送唤醒信号</button>
+          </section>
+        </div>
         <button class="tool-button" id="settings-button" type="button" title="设备信息" aria-expanded="false" aria-controls="settings-panel">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
           <span>设置</span>

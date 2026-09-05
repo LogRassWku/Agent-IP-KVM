@@ -155,6 +155,10 @@ body.agent-mode .agent-topbar-title { opacity: 1; visibility: visible; transform
 }
 .zoom-buttons button:disabled { opacity: .4; cursor: default; }
 .screen-message { min-height: 17px; margin: 0 0 9px; color: #ff8791; font-size: 11px; line-height: 1.45; }
+.popover-title { display: block; margin-bottom: 8px; color: #e8edf4; font-size: 13px; }
+.power-menu { width: 260px; }
+.power-message { min-height: 36px; margin: 0 0 11px; color: #ffb0b7; font-size: 11px; line-height: 1.5; }
+.power-message.available { color: var(--accent); }
 .apply-button {
   width: 100%;
   min-height: 36px;

@@ -103,6 +103,8 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertIn('id="keyboard-button"', page)
             self.assertIn('id="screen-button"', page)
             self.assertIn('id="screen-menu"', page)
+            self.assertIn('id="power-button"', page)
+            self.assertIn('id="power-menu"', page)
             self.assertIn('class="zoom-buttons"', page)
             self.assertIn('id="zoom-out"', page)
             self.assertIn('id="zoom-in"', page)
@@ -136,6 +138,21 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertEqual(payload["stream"]["state"], "idle")
             self.assertEqual(payload["hid"]["state"], "disabled")
             self.assertFalse(payload["hid"]["enabled"])
+            self.assertFalse(payload["power"]["available"])
+            self.assertEqual(payload["power"]["mode"], "unconfigured")
+
+    def test_power_endpoint_reports_unconfigured_hardware(self) -> None:
+        request = Request(
+            f"{self.base_url}/api/power",
+            data=json.dumps({"action": "wake"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request, timeout=2)
+        self.assertEqual(caught.exception.code, 501)
+        payload = json.load(caught.exception)
+        self.assertIn("电源控制线", payload["error"])
 
     def test_hid_controller_taps_and_releases_one_key(self) -> None:
         adapter = SimulatedHidAdapter()
