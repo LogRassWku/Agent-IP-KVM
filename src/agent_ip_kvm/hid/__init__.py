@@ -18,6 +18,7 @@ from .probe import (
     UdcInfo,
     probe_usb_hid,
 )
+from .recovery import RecoveryBundle, RecoveryBundleError, write_recovery_bundle
 from .simulated import SimulatedHidAdapter, SimulatedHidEvent, SimulatedEventKind
 
 __all__ = [
@@ -36,10 +37,13 @@ __all__ = [
     "KEYBOARD_FUNCTION",
     "MOUSE_FUNCTION",
     "RELATIVE_MOUSE_REPORT_DESCRIPTOR",
+    "RecoveryBundle",
+    "RecoveryBundleError",
     "SimulatedEventKind",
     "SimulatedHidAdapter",
     "SimulatedHidEvent",
     "UdcInfo",
     "build_composite_gadget_plan",
     "probe_usb_hid",
+    "write_recovery_bundle",
 ]

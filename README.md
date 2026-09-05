@@ -78,6 +78,16 @@ PYTHONPATH=src python -m agent_ip_kvm.hid_cli --plan-composite
 
 输出中的 `generated_only` 始终为 `true`。清单包含标准描述符、报告长度、校验值、需要保留的现有功能和重绑风险，但不会写入 ConfigFS。RDK X5 实测计划保留 `ECM`、只读存储和 `RNDIS`，再增加独立的 Boot Keyboard 与相对鼠标功能。
 
+为未来的实机重绑生成恢复文件包：
+
+```bash
+PYTHONPATH=src python -m agent_ip_kvm.hid_cli \
+  --plan-composite \
+  --write-recovery-bundle ./hid-recovery
+```
+
+文件包包含状态清单、只读预检查、回滚脚本和本地恢复说明。回滚脚本默认只显示将要执行的操作；实际恢复必须从不依赖 USB QuickLink 的本地会话中，以管理员身份显式运行 `./rollback.sh --apply`。当前没有生成 HID 应用脚本。
+
 ## 启动最小 Web 界面
 
 页面骨架能够显示视频源状态、固定顶部工具栏和设备信息面板：
