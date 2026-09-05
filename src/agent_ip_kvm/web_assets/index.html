@@ -9,6 +9,10 @@
   </head>
   <body>
     <header class="topbar" id="topbar">
+      <button class="agent-mode-button" id="agent-mode-button" type="button" aria-pressed="false" title="切换到 Agent 模式">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.8 8l4.7 1.8-4.7 1.8L12 16l-1.8-4.4-4.7-1.8L10.2 8 12 3.5Z"/><path d="m18.3 15 .8 2.1 2.2.9-2.2.8-.8 2.2-.9-2.2-2.1-.8 2.1-.9.9-2.1Z"/></svg>
+        <span>Agent</span>
+      </button>
       <nav class="tools" aria-label="视频工具栏">
         <button class="tool-button" id="refresh-button" type="button" title="刷新状态">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 9m0 0V4m0 5h5M4 13a8.1 8.1 0 0 0 14.9 4L21 15m0 0v5m0-5h-5"/></svg>
@@ -27,7 +31,7 @@
               <option value="large">大</option>
             </select>
             <p class="mouse-message" id="mouse-message" role="status" aria-live="polite">正在读取 HID 状态</p>
-            <p class="control-hint">鼠标移入视频画面时会自动校准；之后移动、点击和滚轮会按相对位移同步到目标电脑。</p>
+            <p class="control-hint">鼠标移入视频画面后，位置、点击和滚轮会自动同步到目标电脑。</p>
           </section>
         </div>
         <button class="tool-button" id="keyboard-button" type="button" title="屏幕键盘" aria-expanded="false" aria-controls="onscreen-keyboard">
@@ -55,8 +59,46 @@
       </nav>
     </header>
 
-    <main class="workspace">
-      <section class="video-shell" id="video-shell" aria-label="视频画面">
+    <main class="workspace" id="workspace">
+      <section class="agent-shell mode-panel" id="agent-shell" aria-label="Agent 对话界面" aria-hidden="true">
+        <div class="agent-chat">
+          <header class="agent-heading">
+            <span class="agent-orb" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3.5 13.8 8l4.7 1.8-4.7 1.8L12 16l-1.8-4.4-4.7-1.8L10.2 8 12 3.5Z"/><path d="m18.3 15 .8 2.1 2.2.9-2.2.8-.8 2.2-.9-2.2-2.1-.8 2.1-.9.9-2.1Z"/></svg>
+            </span>
+            <div>
+              <p>Agent 模式</p>
+              <h1>想让我帮你操作什么？</h1>
+            </div>
+          </header>
+
+          <div class="agent-conversation" id="agent-conversation" aria-live="polite">
+            <article class="agent-message assistant-message">
+              <span class="message-avatar" aria-hidden="true">A</span>
+              <div>
+                <strong>Agent</strong>
+                <p>我可以观察被控电脑并协助执行任务。涉及安装、BIOS 或系统修改时，会先向你说明操作并等待允许。</p>
+              </div>
+            </article>
+          </div>
+
+          <div class="agent-suggestions" aria-label="快捷指令">
+            <button type="button" data-agent-prompt="检查当前电脑的状态">检查电脑状态</button>
+            <button type="button" data-agent-prompt="分析屏幕上正在显示的错误">分析屏幕错误</button>
+            <button type="button" data-agent-prompt="帮我规划系统镜像安装步骤">规划镜像安装</button>
+          </div>
+
+          <form class="agent-composer" id="agent-composer">
+            <textarea id="agent-input" rows="1" maxlength="2000" placeholder="向 Agent 描述任务…" aria-label="向 Agent 描述任务"></textarea>
+            <button id="agent-send" type="submit" title="发送" aria-label="发送消息">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14"/></svg>
+            </button>
+          </form>
+          <p class="agent-disclaimer">Agent 执行接口尚未连接；当前阶段用于确认交互和界面结构。</p>
+        </div>
+      </section>
+
+      <section class="video-shell mode-panel" id="video-shell" aria-label="视频画面">
         <img class="video-frame" id="video-frame" alt="KVM 视频画面">
         <div class="no-signal" id="no-signal" role="status" aria-live="polite">
           <span class="signal-dot" aria-hidden="true"></span>

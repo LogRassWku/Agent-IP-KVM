@@ -14,6 +14,10 @@ const elements = {
   keyboardRows: document.querySelector("#keyboard-rows"), hidMessage: document.querySelector("#hid-message"),
   releaseKeys: document.querySelector("#release-keys"), v4l2Message: document.querySelector("#v4l2-message"),
   deviceCount: document.querySelector("#device-count"), deviceList: document.querySelector("#device-list"),
+  agentModeButton: document.querySelector("#agent-mode-button"), agentShell: document.querySelector("#agent-shell"),
+  agentComposer: document.querySelector("#agent-composer"), agentInput: document.querySelector("#agent-input"),
+  agentSend: document.querySelector("#agent-send"), agentConversation: document.querySelector("#agent-conversation"),
+  agentSuggestions: document.querySelector(".agent-suggestions"), tools: document.querySelector(".tools"),
 };
 
 let videoModes = [];
@@ -25,6 +29,7 @@ let videoHeight = 9;
 let pendingPointer = null;
 let pendingWheel = 0;
 let pointerRequestActive = false;
+let agentMode = false;
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
 
@@ -152,6 +157,46 @@ function setKeyboard(open) {
   if (open) { setScreenMenu(false); setMouseMenu(false); setPanel(false); } else clearModifiers();
 }
 
+function setAgentMode(open) {
+  agentMode = Boolean(open);
+  document.body.classList.toggle("agent-mode", agentMode);
+  elements.agentModeButton.setAttribute("aria-pressed", String(agentMode));
+  elements.agentModeButton.title = agentMode ? "返回 KVM 模式" : "切换到 Agent 模式";
+  elements.agentShell.setAttribute("aria-hidden", String(!agentMode));
+  elements.videoShell.setAttribute("aria-hidden", String(agentMode));
+  elements.tools.setAttribute("aria-hidden", String(agentMode));
+  if (agentMode) {
+    setPanel(false);
+    setScreenMenu(false);
+    setMouseMenu(false);
+    setKeyboard(false);
+    elements.agentInput.focus({ preventScroll: true });
+  }
+}
+
+function resizeAgentInput() {
+  elements.agentInput.style.height = "auto";
+  elements.agentInput.style.height = `${Math.min(130, elements.agentInput.scrollHeight)}px`;
+}
+
+function submitAgentPrompt(prompt) {
+  const value = String(prompt ?? "").trim();
+  if (!value) return;
+  const article = document.createElement("article");
+  article.className = "agent-message user-message";
+  const content = document.createElement("div");
+  const name = document.createElement("strong");
+  name.textContent = "你";
+  const message = document.createElement("p");
+  message.textContent = value;
+  content.append(name, message);
+  article.append(content);
+  elements.agentConversation.append(article);
+  elements.agentConversation.scrollTop = elements.agentConversation.scrollHeight;
+  elements.agentInput.value = "";
+  resizeAgentInput();
+}
+
 function setZoom(value) {
   zoomPercent = Math.min(200, Math.max(50, Number(value)));
   elements.videoFrame.style.setProperty("--video-zoom", String(zoomPercent / 100));
@@ -263,14 +308,14 @@ elements.zoomOut.addEventListener("click", () => setZoom(zoomPercent - 10));
 elements.zoomIn.addEventListener("click", () => setZoom(zoomPercent + 10));
 elements.cursorSizeSelect.addEventListener("change", () => setCursorSize(elements.cursorSizeSelect.value));
 document.addEventListener("mousemove", (event) => {
-  if (!hidEnabled || !elements.videoShell.contains(event.target)) return;
+  if (agentMode || !hidEnabled || !elements.videoShell.contains(event.target)) return;
   const pointer = pointerFromEvent(event);
   if (pointer === null) return;
   pendingPointer = pointer;
   requestAnimationFrame(flushPointerPosition);
 });
 document.addEventListener("mousedown", (event) => {
-  if (!hidEnabled || !elements.videoShell.contains(event.target)) return;
+  if (agentMode || !hidEnabled || !elements.videoShell.contains(event.target)) return;
   const pointer = pointerFromEvent(event);
   if (pointer === null) return;
   event.preventDefault();
@@ -278,7 +323,7 @@ document.addEventListener("mousedown", (event) => {
   clickMouse(event.button, pointer);
 });
 document.addEventListener("wheel", (event) => {
-  if (!hidEnabled || !elements.videoShell.contains(event.target)) return;
+  if (agentMode || !hidEnabled || !elements.videoShell.contains(event.target)) return;
   const pointer = pointerFromEvent(event);
   if (pointer === null) return;
   event.preventDefault();
@@ -287,7 +332,23 @@ document.addEventListener("wheel", (event) => {
   requestAnimationFrame(flushPointerPosition);
 }, { passive: false });
 elements.videoShell.addEventListener("contextmenu", (event) => {
-  if (hidEnabled && pointerFromEvent(event) !== null) event.preventDefault();
+  if (!agentMode && hidEnabled && pointerFromEvent(event) !== null) event.preventDefault();
+});
+elements.agentModeButton.addEventListener("click", () => setAgentMode(!agentMode));
+elements.agentInput.addEventListener("input", resizeAgentInput);
+elements.agentInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    submitAgentPrompt(elements.agentInput.value);
+  }
+});
+elements.agentComposer.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitAgentPrompt(elements.agentInput.value);
+});
+elements.agentSuggestions.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-agent-prompt]");
+  if (button) submitAgentPrompt(button.dataset.agentPrompt);
 });
 elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {
@@ -310,7 +371,10 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest("#screen-menu") && !event.target.closest("#screen-button")) setScreenMenu(false);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") { setPanel(false); setScreenMenu(false); setMouseMenu(false); setKeyboard(false); }
+  if (event.key === "Escape") {
+    if (agentMode) setAgentMode(false);
+    else { setPanel(false); setScreenMenu(false); setMouseMenu(false); setKeyboard(false); }
+  }
 });
 
 setZoom(100); setCursorSize("medium"); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000);
