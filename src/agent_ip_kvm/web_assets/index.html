@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <title>Agent IP KVM</title>
-    <link rel="stylesheet" href="/styles.css?v=20260906-2">
+    <link rel="stylesheet" href="/styles.css?v=20260906-3">
   </head>
   <body>
     <header class="topbar" id="topbar">
@@ -68,14 +68,23 @@
         <div class="agent-app">
           <aside class="agent-sidebar" id="agent-sidebar" aria-label="Agent 会话">
             <div class="agent-sidebar-header">
-              <label class="model-selector" for="agent-model-select">
-                <span>模型</span>
-                <select id="agent-model-select" aria-label="选择 Agent 模型">
-                  <option value="qwen2.5-1.5b">Qwen2.5 1.5B · 板载</option>
-                  <option value="pc-agent">PC Agent · 自动选择</option>
-                  <option value="remote-api">远程 API · 未配置</option>
-                </select>
-              </label>
+              <div class="model-picker" id="agent-model-picker">
+                <button class="model-picker-button" id="agent-model-button" type="button" aria-expanded="false" aria-controls="agent-model-menu">
+                  <span id="agent-model-name">Qwen2.5 1.5B</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>
+                </button>
+                <section class="model-menu" id="agent-model-menu" aria-label="选择 Agent 模型" hidden>
+                  <button type="button" data-model-option="qwen2.5-1.5b">
+                    <span><strong>Qwen2.5 1.5B</strong><small>板载轻量模型</small></span><i aria-hidden="true">✓</i>
+                  </button>
+                  <button type="button" data-model-option="pc-agent">
+                    <span><strong>PC Agent</strong><small>使用被控电脑上的模型</small></span><i aria-hidden="true">✓</i>
+                  </button>
+                  <button type="button" data-model-option="remote-api">
+                    <span><strong>远程 API</strong><small>连接外部模型服务</small></span><i aria-hidden="true">✓</i>
+                  </button>
+                </section>
+              </div>
               <button class="new-chat-button" id="new-agent-chat" type="button">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                 <span>新建会话</span>
@@ -186,6 +195,6 @@
       </section>
     </aside>
 
-    <script src="/app.js?v=20260906-2"></script>
+    <script src="/app.js?v=20260906-3"></script>
   </body>
 </html>

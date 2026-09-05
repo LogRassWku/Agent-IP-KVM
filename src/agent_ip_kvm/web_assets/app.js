@@ -17,7 +17,9 @@ const elements = {
   agentModeButton: document.querySelector("#agent-mode-button"), agentShell: document.querySelector("#agent-shell"),
   agentComposer: document.querySelector("#agent-composer"), agentInput: document.querySelector("#agent-input"),
   agentSend: document.querySelector("#agent-send"), agentConversation: document.querySelector("#agent-conversation"),
-  tools: document.querySelector(".tools"), agentModelSelect: document.querySelector("#agent-model-select"),
+  tools: document.querySelector(".tools"), agentModelPicker: document.querySelector("#agent-model-picker"),
+  agentModelButton: document.querySelector("#agent-model-button"), agentModelMenu: document.querySelector("#agent-model-menu"),
+  agentModelName: document.querySelector("#agent-model-name"),
   agentApp: document.querySelector(".agent-app"), agentSidebar: document.querySelector("#agent-sidebar"),
   agentSidebarToggle: document.querySelector("#agent-sidebar-toggle"), newAgentChat: document.querySelector("#new-agent-chat"),
   agentSessionList: document.querySelector("#agent-session-list"), agentChatTitle: document.querySelector("#agent-chat-title"),
@@ -35,6 +37,11 @@ let pointerRequestActive = false;
 let agentMode = false;
 const agentStorageKey = "agent-ip-kvm.sessions.v1";
 const agentModelStorageKey = "agent-ip-kvm.model.v1";
+const agentModelNames = {
+  "qwen2.5-1.5b": "Qwen2.5 1.5B",
+  "pc-agent": "PC Agent",
+  "remote-api": "远程 API",
+};
 let agentSessions = [];
 let activeAgentSessionId = "";
 
@@ -166,6 +173,7 @@ function setKeyboard(open) {
 
 function setAgentMode(open) {
   agentMode = Boolean(open);
+  setAgentModelMenu(false);
   if (!agentMode) {
     elements.agentApp.classList.remove("sidebar-open");
     elements.agentSidebarToggle.setAttribute("aria-expanded", "false");
@@ -215,10 +223,29 @@ function loadAgentSessions() {
 }
 
 function loadAgentModel() {
+  let selected = "qwen2.5-1.5b";
   try {
     const saved = localStorage.getItem(agentModelStorageKey);
-    if ([...elements.agentModelSelect.options].some((option) => option.value === saved)) elements.agentModelSelect.value = saved;
+    if (saved in agentModelNames) selected = saved;
   } catch (_) { /* Keep the default model if local storage is unavailable. */ }
+  selectAgentModel(selected, false);
+}
+
+function setAgentModelMenu(open) {
+  elements.agentModelMenu.hidden = !open;
+  elements.agentModelButton.setAttribute("aria-expanded", String(open));
+}
+
+function selectAgentModel(modelId, persist = true) {
+  const selected = modelId in agentModelNames ? modelId : "qwen2.5-1.5b";
+  elements.agentModelName.textContent = agentModelNames[selected];
+  for (const option of elements.agentModelMenu.querySelectorAll("[data-model-option]")) {
+    option.classList.toggle("selected", option.dataset.modelOption === selected);
+  }
+  setAgentModelMenu(false);
+  if (persist) {
+    try { localStorage.setItem(agentModelStorageKey, selected); } catch (_) { /* UI selection still works. */ }
+  }
 }
 
 function activeAgentSession() {
@@ -266,19 +293,10 @@ function renderAgentMessage(message) {
   const article = document.createElement("article");
   const assistant = message.role === "assistant";
   article.className = `agent-message ${assistant ? "assistant-message" : "user-message"}`;
-  if (assistant) {
-    const avatar = document.createElement("span");
-    avatar.className = "message-avatar";
-    avatar.setAttribute("aria-hidden", "true");
-    avatar.textContent = "A";
-    article.append(avatar);
-  }
   const content = document.createElement("div");
-  const name = document.createElement("strong");
-  name.textContent = assistant ? "Agent" : "你";
   const paragraph = document.createElement("p");
   paragraph.textContent = String(message.content ?? "");
-  content.append(name, paragraph);
+  content.append(paragraph);
   article.append(content);
   return article;
 }
@@ -517,8 +535,10 @@ elements.agentComposer.addEventListener("submit", (event) => {
   event.preventDefault();
   submitAgentPrompt(elements.agentInput.value);
 });
-elements.agentModelSelect.addEventListener("change", () => {
-  try { localStorage.setItem(agentModelStorageKey, elements.agentModelSelect.value); } catch (_) { /* UI selection still works. */ }
+elements.agentModelButton.addEventListener("click", () => setAgentModelMenu(elements.agentModelMenu.hidden));
+elements.agentModelMenu.addEventListener("click", (event) => {
+  const option = event.target.closest("[data-model-option]");
+  if (option) selectAgentModel(option.dataset.modelOption);
 });
 elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {
@@ -539,6 +559,7 @@ elements.applyScreenSettings.addEventListener("click", async () => {
 document.addEventListener("click", (event) => {
   if (!event.target.closest("#mouse-tool-menu") && !event.target.closest("#mouse-button")) setMouseMenu(false);
   if (!event.target.closest("#screen-menu") && !event.target.closest("#screen-button")) setScreenMenu(false);
+  if (!event.target.closest("#agent-model-picker")) setAgentModelMenu(false);
   if (elements.agentApp.classList.contains("sidebar-open") && !event.target.closest("#agent-sidebar") && !event.target.closest("#agent-sidebar-toggle")) {
     elements.agentApp.classList.remove("sidebar-open");
     elements.agentSidebarToggle.setAttribute("aria-expanded", "false");
