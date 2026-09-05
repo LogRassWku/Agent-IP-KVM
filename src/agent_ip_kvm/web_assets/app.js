@@ -1,8 +1,5 @@
 const elements = {
-  connection: document.querySelector("#connection"),
-  statusLabel: document.querySelector("#status-label"),
-  streamMessage: document.querySelector("#stream-message"),
-  sourceBadge: document.querySelector("#source-badge"),
+  noSignal: document.querySelector("#no-signal"),
   panel: document.querySelector("#settings-panel"),
   backdrop: document.querySelector("#panel-backdrop"),
   settingsButton: document.querySelector("#settings-button"),
@@ -49,10 +46,7 @@ function updateDevices(v4l2) {
 function updateStatus(payload) {
   const source = payload.source;
   const available = source?.health === "available";
-  elements.connection.className = `connection ${available ? "ready" : "error"}`;
-  elements.statusLabel.textContent = available ? "视频源可用" : "视频源不可用";
-  elements.streamMessage.textContent = payload.stream?.message ?? "暂无视频画面";
-  elements.sourceBadge.textContent = source?.source_id ?? "未选择视频源";
+  elements.noSignal.classList.toggle("unavailable", !available);
 
   text("info-backend", source?.backend);
   text("info-source", source?.source_id);
@@ -65,16 +59,12 @@ function updateStatus(payload) {
 }
 
 async function refreshStatus() {
-  elements.statusLabel.textContent = "正在读取状态";
-  elements.connection.className = "connection";
   try {
     const response = await fetch("/api/status", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     updateStatus(await response.json());
   } catch (error) {
-    elements.connection.className = "connection error";
-    elements.statusLabel.textContent = "服务连接失败";
-    elements.streamMessage.textContent = "无法读取设备状态，请检查服务连接";
+    elements.noSignal.classList.add("unavailable");
     text("info-error", error.message);
   }
 }

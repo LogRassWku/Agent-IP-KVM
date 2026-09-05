@@ -24,6 +24,9 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn("Agent IP KVM", page)
             self.assertIn('id="settings-panel"', page)
+            self.assertIn("No Signal", page)
+            self.assertNotIn("暂无视频画面", page)
+            self.assertNotIn('id="connection"', page)
 
         with urlopen(f"{self.base_url}/api/status", timeout=2) as response:
             payload = json.load(response)

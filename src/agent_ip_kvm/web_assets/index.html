@@ -10,13 +10,7 @@
   <body>
     <header class="topbar" id="topbar">
       <div class="brand" aria-label="Agent IP KVM">
-        <span class="brand-mark">A</span>
         <span class="brand-name">Agent IP KVM</span>
-      </div>
-
-      <div class="connection" id="connection" role="status" aria-live="polite">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-label">正在读取状态</span>
       </div>
 
       <nav class="tools" aria-label="视频工具栏">
@@ -37,15 +31,10 @@
 
     <main class="workspace">
       <section class="video-shell" id="video-shell" aria-label="视频画面">
-        <div class="video-grid" aria-hidden="true"></div>
-        <div class="empty-state">
-          <span class="video-symbol">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="14" height="14" rx="2"/><path d="m17 10 4-2v8l-4-2z"/></svg>
-          </span>
-          <h1>暂无视频画面</h1>
-          <p id="stream-message">正在检查视频源</p>
+        <div class="no-signal" id="no-signal" role="status" aria-live="polite">
+          <span class="signal-dot" aria-hidden="true"></span>
+          <span>No Signal</span>
         </div>
-        <div class="source-badge" id="source-badge">--</div>
       </section>
     </main>
 
