@@ -38,13 +38,6 @@
             <span>屏幕</span>
           </button>
           <section class="popover-menu screen-menu" id="screen-menu" aria-label="屏幕设置" hidden>
-            <label for="zoom-range">画面缩放</label>
-            <div class="zoom-control">
-              <button id="zoom-out" type="button" aria-label="缩小画面">−</button>
-              <input id="zoom-range" type="range" min="50" max="200" step="10" value="100">
-              <button id="zoom-in" type="button" aria-label="放大画面">+</button>
-              <output id="zoom-value" for="zoom-range">100%</output>
-            </div>
             <label for="resolution-select">分辨率</label>
             <select id="resolution-select"></select>
             <label for="refresh-rate-select">刷新率</label>
@@ -66,6 +59,10 @@
         <div class="no-signal" id="no-signal" role="status" aria-live="polite">
           <span class="signal-dot" aria-hidden="true"></span>
           <span>No Signal</span>
+        </div>
+        <div class="zoom-buttons" aria-label="画面缩放">
+          <button id="zoom-out" type="button" title="缩小画面" aria-label="缩小画面">−</button>
+          <button id="zoom-in" type="button" title="放大画面" aria-label="放大画面">+</button>
         </div>
       </section>
     </main>

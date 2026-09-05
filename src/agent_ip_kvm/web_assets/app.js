@@ -6,7 +6,6 @@ const elements = {
   screenButton: document.querySelector("#screen-button"), screenMenu: document.querySelector("#screen-menu"),
   resolutionSelect: document.querySelector("#resolution-select"), refreshRateSelect: document.querySelector("#refresh-rate-select"),
   screenMessage: document.querySelector("#screen-message"), applyScreenSettings: document.querySelector("#apply-screen-settings"),
-  zoomRange: document.querySelector("#zoom-range"), zoomValue: document.querySelector("#zoom-value"),
   zoomOut: document.querySelector("#zoom-out"), zoomIn: document.querySelector("#zoom-in"),
   mouseButton: document.querySelector("#mouse-button"), mouseMenu: document.querySelector("#mouse-menu"),
   cursorSizeSelect: document.querySelector("#cursor-size-select"), keyboardButton: document.querySelector("#keyboard-button"),
@@ -18,6 +17,7 @@ const elements = {
 
 let videoModes = [];
 let hidEnabled = false;
+let zoomPercent = 100;
 const activeModifiers = new Set();
 
 function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
@@ -134,9 +134,12 @@ function setKeyboard(open) {
 }
 
 function setZoom(value) {
-  const zoom = Math.min(200, Math.max(50, Number(value)));
-  elements.zoomRange.value = String(zoom); elements.zoomValue.value = `${zoom}%`;
-  elements.videoFrame.style.setProperty("--video-zoom", String(zoom / 100));
+  zoomPercent = Math.min(200, Math.max(50, Number(value)));
+  elements.videoFrame.style.setProperty("--video-zoom", String(zoomPercent / 100));
+  elements.zoomOut.disabled = zoomPercent <= 50;
+  elements.zoomIn.disabled = zoomPercent >= 200;
+  elements.zoomOut.title = `缩小画面（当前 ${zoomPercent}%）`;
+  elements.zoomIn.title = `放大画面（当前 ${zoomPercent}%）`;
 }
 function setCursorSize(size) {
   const selected = ["small", "medium", "large"].includes(size) ? size : "medium";
@@ -176,9 +179,8 @@ elements.screenButton.addEventListener("click", () => setScreenMenu(elements.scr
 elements.mouseButton.addEventListener("click", () => setMouseMenu(elements.mouseMenu.hidden));
 elements.keyboardButton.addEventListener("click", () => setKeyboard(elements.keyboard.hidden));
 elements.closeKeyboard.addEventListener("click", () => setKeyboard(false));
-elements.zoomRange.addEventListener("input", () => setZoom(elements.zoomRange.value));
-elements.zoomOut.addEventListener("click", () => setZoom(Number(elements.zoomRange.value) - 10));
-elements.zoomIn.addEventListener("click", () => setZoom(Number(elements.zoomRange.value) + 10));
+elements.zoomOut.addEventListener("click", () => setZoom(zoomPercent - 10));
+elements.zoomIn.addEventListener("click", () => setZoom(zoomPercent + 10));
 elements.cursorSizeSelect.addEventListener("change", () => setCursorSize(elements.cursorSizeSelect.value));
 elements.resolutionSelect.addEventListener("change", () => fillRefreshRates(0));
 elements.keyboardRows.addEventListener("click", (event) => {
