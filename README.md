@@ -138,7 +138,20 @@ sudo sh scripts/install-uvc-power-rule.sh 2b89 5854
 sudo sh scripts/install-uvc-power-rule.sh --remove
 ```
 
-顶部栏显示刷新、鼠标、键盘、屏幕和设置按钮，不显示项目标题或品牌图标。鼠标和键盘按钮目前作为后续控制入口，在安全控制流程接入前保持禁用；屏幕按钮会在按钮下方打开小窗口，可从采集设备实际支持的 MJPEG 模式中选择分辨率和刷新率。
+顶部栏显示刷新、鼠标、键盘、屏幕和设置按钮，不显示项目标题或品牌图标。屏幕菜单可把浏览器中的画面缩放到 50% 至 200%，也可从采集设备实际支持的 MJPEG 模式中选择分辨率和刷新率；缩放画面不会移动顶部工具栏。鼠标菜单当前只调整画面内的光标大小。键盘按钮会打开触屏屏幕键盘，HID 后端未启用时按键保持不可用。
+
+Web HID 默认关闭。开发阶段可以显式启用内存模拟后端，验证界面和按键生命周期而不控制连接的电脑：
+
+```bash
+PYTHONPATH=src python -m agent_ip_kvm.web \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --source synthetic \
+  --enable-hid \
+  --hid-backend simulated
+```
+
+Linux USB Gadget 后端还需要已经存在的 `hid.keyboard` 和 `hid.mouse` ConfigFS 功能。正式环境开放真实输入前仍需完成认证和单一控制者机制。
 
 ## 计划架构
 

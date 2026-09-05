@@ -2,9 +2,11 @@ import json
 import threading
 import unittest
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
+from agent_ip_kvm.hid import SimulatedEventKind, SimulatedHidAdapter
 from agent_ip_kvm.video import EndOfStream, Frame, SourceCapability, SourceHealth
-from agent_ip_kvm.web import VideoStreamController, WebConfig, create_server
+from agent_ip_kvm.web import HidWebController, VideoStreamController, WebConfig, create_server
 
 
 class StaticStream:
@@ -83,6 +85,10 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertIn('id="keyboard-button"', page)
             self.assertIn('id="screen-button"', page)
             self.assertIn('id="screen-menu"', page)
+            self.assertIn('id="zoom-range"', page)
+            self.assertIn('id="cursor-size-select"', page)
+            self.assertIn('id="onscreen-keyboard"', page)
+            self.assertIn('data-key="enter"', page)
             self.assertIn('id="resolution-select"', page)
             self.assertIn('id="refresh-rate-select"', page)
             self.assertNotIn('id="fullscreen-button"', page)
@@ -101,6 +107,80 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertEqual(payload["source"]["backend"], "synthetic")
             self.assertEqual(payload["source"]["health"], "available")
             self.assertEqual(payload["stream"]["state"], "idle")
+            self.assertEqual(payload["hid"]["state"], "disabled")
+            self.assertFalse(payload["hid"]["enabled"])
+
+    def test_hid_controller_taps_and_releases_one_key(self) -> None:
+        adapter = SimulatedHidAdapter()
+        controller = HidWebController(adapter, backend="simulated")
+
+        result = controller.tap_key({"key": "a", "modifiers": ["shift"]})
+
+        self.assertEqual(result, {"key": "a", "modifiers": ["shift"]})
+        self.assertEqual(
+            [event.kind for event in adapter.events],
+            [
+                SimulatedEventKind.ARMED,
+                SimulatedEventKind.KEY_DOWN,
+                SimulatedEventKind.KEY_DOWN,
+                SimulatedEventKind.KEY_UP,
+                SimulatedEventKind.KEY_UP,
+            ],
+        )
+        self.assertEqual(adapter.pressed_keys, frozenset())
+
+    def test_hid_controller_rejects_unknown_keys_before_output(self) -> None:
+        adapter = SimulatedHidAdapter()
+        controller = HidWebController(adapter, backend="simulated")
+
+        with self.assertRaisesRegex(ValueError, "unsupported key"):
+            controller.tap_key({"key": "power", "modifiers": []})
+
+        self.assertEqual(adapter.events, ())
+
+    def test_web_hid_key_endpoint_uses_explicit_adapter(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        adapter = SimulatedHidAdapter()
+        self.server = create_server(
+            "127.0.0.1",
+            0,
+            WebConfig(),
+            hid_adapter=adapter,
+            hid_backend="simulated",
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+        request = Request(
+            f"{self.base_url}/api/hid/key",
+            data=json.dumps({"key": "enter", "modifiers": []}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["hid"]["key"], "enter")
+
+        self.assertEqual(adapter.pressed_keys, frozenset())
+
+    def test_web_hid_rejects_cross_origin_requests(self) -> None:
+        request = Request(
+            f"{self.base_url}/api/hid/key",
+            data=json.dumps({"key": "enter", "modifiers": []}).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": "https://example.invalid",
+            },
+            method="POST",
+        )
+
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request, timeout=2)
+        self.assertEqual(caught.exception.code, 403)
 
     def test_serves_mjpeg_frames(self) -> None:
         self.server.shutdown()

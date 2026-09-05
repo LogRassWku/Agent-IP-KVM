@@ -16,6 +16,8 @@ from typing import Callable, Iterator, Protocol
 from urllib.parse import urlsplit
 
 from . import __version__
+from .hid import HidAdapter, HidError, HidState, LinuxGadgetHidAdapter, SimulatedHidAdapter
+from .hid.linux_gadget import KEY_USAGES, wait_for_hidg_path
 from .video import (
     EndOfStream,
     FFmpegFileVideoSource,
@@ -113,6 +115,80 @@ class StreamProvider(Protocol):
 
 
 SettingsUpdater = Callable[[dict[str, object]], dict[str, object]]
+
+
+class HidWebController:
+    """Expose a deliberately small, serialized HID surface to the Web UI."""
+
+    _MODIFIERS = {"ctrl", "shift", "alt", "win"}
+
+    def __init__(self, adapter: HidAdapter | None = None, *, backend: str = "disabled") -> None:
+        self._adapter = adapter
+        self._backend = backend if adapter is not None else "disabled"
+        self._lock = threading.Lock()
+
+    def status(self) -> dict[str, object]:
+        adapter = self._adapter
+        return {
+            "enabled": adapter is not None,
+            "backend": self._backend,
+            "state": adapter.state.value if adapter is not None else "disabled",
+        }
+
+    def tap_key(self, payload: dict[str, object]) -> dict[str, object]:
+        adapter = self._require_adapter()
+        key = payload.get("key")
+        modifiers = payload.get("modifiers", [])
+        if not isinstance(key, str) or key not in KEY_USAGES:
+            raise ValueError("unsupported key")
+        if not isinstance(modifiers, list) or any(
+            not isinstance(item, str) or item not in self._MODIFIERS for item in modifiers
+        ):
+            raise ValueError("unsupported modifier")
+        if len(set(modifiers)) != len(modifiers):
+            raise ValueError("duplicate modifier")
+
+        with self._lock:
+            if adapter.state is HidState.CLOSED:
+                adapter.arm()
+            if adapter.state is not HidState.READY:
+                raise HidError(f"HID is not ready: {adapter.state.value}")
+            operation_error: Exception | None = None
+            try:
+                for modifier in modifiers:
+                    adapter.key_down(modifier)
+                adapter.key_down(key)
+                adapter.key_up(key)
+                for modifier in reversed(modifiers):
+                    adapter.key_up(modifier)
+            except Exception as exc:
+                operation_error = exc
+                raise
+            finally:
+                try:
+                    adapter.release_all()
+                except Exception:
+                    if operation_error is None:
+                        raise
+        return {"key": key, "modifiers": modifiers}
+
+    def release_all(self) -> None:
+        adapter = self._require_adapter()
+        with self._lock:
+            if adapter.state is HidState.CLOSED:
+                adapter.arm()
+            adapter.release_all()
+
+    def close(self) -> None:
+        adapter = self._adapter
+        if adapter is not None:
+            with self._lock:
+                adapter.close()
+
+    def _require_adapter(self) -> HidAdapter:
+        if self._adapter is None:
+            raise HidError("HID output is not enabled on this server")
+        return self._adapter
 
 
 class _FFmpegJPEGEncoder:
@@ -374,13 +450,18 @@ def create_handler(
     status_provider: Callable[[WebConfig], dict[str, object]] = collect_status,
     stream_provider: StreamProvider | None = None,
     settings_updater: SettingsUpdater | None = None,
+    hid_controller: HidWebController | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     stream = stream_provider or VideoStreamController(config)
+    hid = hid_controller or HidWebController()
     assets = {
         "/": ("index.html", "text/html; charset=utf-8"),
         "/index.html": ("index.html", "text/html; charset=utf-8"),
         "/styles.css": ("styles.css", "text/css; charset=utf-8"),
         "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+        "/cursor-small.svg": ("cursor-small.svg", "image/svg+xml"),
+        "/cursor-medium.svg": ("cursor-medium.svg", "image/svg+xml"),
+        "/cursor-large.svg": ("cursor-large.svg", "image/svg+xml"),
     }
 
     class RequestHandler(BaseHTTPRequestHandler):
@@ -389,6 +470,7 @@ def create_handler(
             if path == "/api/status":
                 payload = status_provider(config)
                 payload["stream"] = stream.status()
+                payload["hid"] = hid.status()
                 self._send_json(payload)
                 return
             if path == "/api/stream.mjpg":
@@ -403,25 +485,51 @@ def create_handler(
 
         def do_POST(self) -> None:
             path = urlsplit(self.path).path
-            if path != "/api/video-settings" or settings_updater is None:
+            if path not in {"/api/video-settings", "/api/hid/key", "/api/hid/release"}:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
+            content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip()
+            if content_type != "application/json":
+                self._send_json(
+                    {"error": "Content-Type must be application/json"},
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                )
+                return
+            origin = self.headers.get("Origin")
+            host = self.headers.get("Host")
+            if origin:
+                parsed_origin = urlsplit(origin)
+                if parsed_origin.scheme not in {"http", "https"} or parsed_origin.netloc != host:
+                    self._send_json(
+                        {"error": "cross-origin control requests are not allowed"},
+                        HTTPStatus.FORBIDDEN,
+                    )
+                    return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = 0
-            if length <= 0 or length > 4096:
+            if length < 0 or length > 4096 or (length == 0 and path != "/api/hid/release"):
                 self._send_json({"error": "invalid request body"}, HTTPStatus.BAD_REQUEST)
                 return
             try:
-                payload = json.loads(self.rfile.read(length))
+                payload = json.loads(self.rfile.read(length)) if length else {}
                 if not isinstance(payload, dict):
                     raise ValueError("request body must be a JSON object")
-                video = settings_updater(payload)
-            except (json.JSONDecodeError, TypeError, ValueError, VideoSourceError) as exc:
+                if path == "/api/video-settings":
+                    if settings_updater is None:
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    result = {"video": settings_updater(payload)}
+                elif path == "/api/hid/key":
+                    result = {"hid": hid.tap_key(payload)}
+                else:
+                    hid.release_all()
+                    result = {"hid": hid.status()}
+            except (json.JSONDecodeError, TypeError, ValueError, VideoSourceError, HidError) as exc:
                 self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
-            self._send_json({"video": video})
+            self._send_json(result)
 
         def _send_json(
             self,
@@ -476,15 +584,24 @@ def create_handler(
 class KVMHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, server_address: tuple[str, int], config: WebConfig) -> None:
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        config: WebConfig,
+        hid_adapter: HidAdapter | None = None,
+        *,
+        hid_backend: str = "disabled",
+    ) -> None:
         self.config = config
         self.stream_controller = VideoStreamController(config)
+        self.hid_controller = HidWebController(hid_adapter, backend=hid_backend)
         super().__init__(
             server_address,
             create_handler(
                 config,
                 stream_provider=self.stream_controller,
                 settings_updater=self.update_video_settings,
+                hid_controller=self.hid_controller,
             ),
         )
 
@@ -518,11 +635,21 @@ class KVMHTTPServer(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.stream_controller.close()
+        self.hid_controller.close()
         super().server_close()
 
 
-def create_server(host: str, port: int, config: WebConfig) -> KVMHTTPServer:
-    return KVMHTTPServer((host, port), config)
+def create_server(
+    host: str,
+    port: int,
+    config: WebConfig,
+    hid_adapter: HidAdapter | None = None,
+    *,
+    hid_backend: str = "disabled",
+) -> KVMHTTPServer:
+    return KVMHTTPServer(
+        (host, port), config, hid_adapter=hid_adapter, hid_backend=hid_backend
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -535,6 +662,20 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--fps", type=float, default=30.0)
+    parser.add_argument(
+        "--enable-hid",
+        action="store_true",
+        help="explicitly enable Web keyboard output",
+    )
+    parser.add_argument("--hid-backend", choices=("linux", "simulated"), default="linux")
+    parser.add_argument(
+        "--gadget-root",
+        type=Path,
+        default=Path("/sys/kernel/config/usb_gadget/g_comp"),
+    )
+    parser.add_argument("--keyboard-function", default="hid.keyboard")
+    parser.add_argument("--mouse-function", default="hid.mouse")
+    parser.add_argument("--hid-timeout", type=float, default=10.0)
     return parser
 
 
@@ -550,7 +691,26 @@ def main(argv: list[str] | None = None) -> int:
         height=args.height,
         fps=args.fps,
     )
-    server = create_server(args.host, args.port, config)
+    hid_adapter: HidAdapter | None = None
+    if args.enable_hid:
+        if args.hid_backend == "simulated":
+            hid_adapter = SimulatedHidAdapter()
+        else:
+            functions = args.gadget_root / "functions"
+            keyboard_path = wait_for_hidg_path(
+                functions / args.keyboard_function, timeout_seconds=args.hid_timeout
+            )
+            mouse_path = wait_for_hidg_path(
+                functions / args.mouse_function, timeout_seconds=args.hid_timeout
+            )
+            hid_adapter = LinuxGadgetHidAdapter(keyboard_path, mouse_path)
+    server = create_server(
+        args.host,
+        args.port,
+        config,
+        hid_adapter=hid_adapter,
+        hid_backend=args.hid_backend if args.enable_hid else "disabled",
+    )
     print(f"Agent IP KVM web interface: http://{args.host}:{args.port}")
     try:
         server.serve_forever()

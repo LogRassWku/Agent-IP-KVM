@@ -14,11 +14,21 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 9m0 0V4m0 5h5M4 13a8.1 8.1 0 0 0 14.9 4L21 15m0 0v5m0-5h-5"/></svg>
           <span>刷新</span>
         </button>
-        <button class="tool-button" id="mouse-button" type="button" title="鼠标控制（尚未开放）" disabled>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 2.5V9M9 9h6"/></svg>
-          <span>鼠标</span>
-        </button>
-        <button class="tool-button" id="keyboard-button" type="button" title="键盘控制（尚未开放）" disabled>
+        <div class="tool-menu" id="mouse-tool-menu">
+          <button class="tool-button" id="mouse-button" type="button" title="鼠标设置" aria-expanded="false" aria-controls="mouse-menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 2.5V9M9 9h6"/></svg>
+            <span>鼠标</span>
+          </button>
+          <section class="popover-menu mouse-menu" id="mouse-menu" aria-label="鼠标设置" hidden>
+            <label for="cursor-size-select">画面内光标大小</label>
+            <select id="cursor-size-select">
+              <option value="small">小</option>
+              <option value="medium" selected>中</option>
+              <option value="large">大</option>
+            </select>
+          </section>
+        </div>
+        <button class="tool-button" id="keyboard-button" type="button" title="屏幕键盘" aria-expanded="false" aria-controls="onscreen-keyboard">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M6.5 9h.01M10.2 9h.01M13.8 9h.01M17.5 9h.01M6.5 12h.01M10.2 12h.01M13.8 12h.01M17.5 12h.01M7 15.5h10"/></svg>
           <span>键盘</span>
         </button>
@@ -27,7 +37,14 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="14" rx="2"/><path d="M8 21h8M12 17.5V21"/></svg>
             <span>屏幕</span>
           </button>
-          <section class="screen-menu" id="screen-menu" aria-label="屏幕设置" hidden>
+          <section class="popover-menu screen-menu" id="screen-menu" aria-label="屏幕设置" hidden>
+            <label for="zoom-range">画面缩放</label>
+            <div class="zoom-control">
+              <button id="zoom-out" type="button" aria-label="缩小画面">−</button>
+              <input id="zoom-range" type="range" min="50" max="200" step="10" value="100">
+              <button id="zoom-in" type="button" aria-label="放大画面">+</button>
+              <output id="zoom-value" for="zoom-range">100%</output>
+            </div>
             <label for="resolution-select">分辨率</label>
             <select id="resolution-select"></select>
             <label for="refresh-rate-select">刷新率</label>
@@ -52,6 +69,43 @@
         </div>
       </section>
     </main>
+
+    <section class="onscreen-keyboard" id="onscreen-keyboard" aria-label="屏幕键盘" hidden>
+      <div class="keyboard-heading">
+        <div>
+          <strong>屏幕键盘</strong>
+          <span id="hid-message" role="status" aria-live="polite">正在读取 HID 状态</span>
+        </div>
+        <div class="keyboard-actions">
+          <button id="release-keys" type="button">释放全部</button>
+          <button class="icon-button" id="close-keyboard" type="button" title="关闭屏幕键盘" aria-label="关闭屏幕键盘">×</button>
+        </div>
+      </div>
+      <div class="keyboard-rows" id="keyboard-rows">
+        <div class="keyboard-row compact-row">
+          <button class="keyboard-key" data-key="escape">Esc</button>
+          <button class="keyboard-key" data-key="f1">F1</button><button class="keyboard-key" data-key="f2">F2</button><button class="keyboard-key" data-key="f3">F3</button><button class="keyboard-key" data-key="f4">F4</button>
+          <button class="keyboard-key" data-key="f5">F5</button><button class="keyboard-key" data-key="f6">F6</button><button class="keyboard-key" data-key="f7">F7</button><button class="keyboard-key" data-key="f8">F8</button>
+          <button class="keyboard-key" data-key="f9">F9</button><button class="keyboard-key" data-key="f10">F10</button><button class="keyboard-key" data-key="f11">F11</button><button class="keyboard-key" data-key="f12">F12</button>
+          <button class="keyboard-key" data-key="delete">Del</button>
+        </div>
+        <div class="keyboard-row">
+          <button class="keyboard-key" data-key="`">`</button><button class="keyboard-key" data-key="1">1</button><button class="keyboard-key" data-key="2">2</button><button class="keyboard-key" data-key="3">3</button><button class="keyboard-key" data-key="4">4</button><button class="keyboard-key" data-key="5">5</button><button class="keyboard-key" data-key="6">6</button><button class="keyboard-key" data-key="7">7</button><button class="keyboard-key" data-key="8">8</button><button class="keyboard-key" data-key="9">9</button><button class="keyboard-key" data-key="0">0</button><button class="keyboard-key" data-key="-">−</button><button class="keyboard-key" data-key="=">=</button><button class="keyboard-key wide" data-key="backspace">Backspace</button>
+        </div>
+        <div class="keyboard-row">
+          <button class="keyboard-key wide" data-key="tab">Tab</button><button class="keyboard-key" data-key="q">Q</button><button class="keyboard-key" data-key="w">W</button><button class="keyboard-key" data-key="e">E</button><button class="keyboard-key" data-key="r">R</button><button class="keyboard-key" data-key="t">T</button><button class="keyboard-key" data-key="y">Y</button><button class="keyboard-key" data-key="u">U</button><button class="keyboard-key" data-key="i">I</button><button class="keyboard-key" data-key="o">O</button><button class="keyboard-key" data-key="p">P</button><button class="keyboard-key" data-key="[">[</button><button class="keyboard-key" data-key="]">]</button><button class="keyboard-key" data-key="\">\</button>
+        </div>
+        <div class="keyboard-row">
+          <button class="keyboard-key wide" data-key="capslock">Caps</button><button class="keyboard-key" data-key="a">A</button><button class="keyboard-key" data-key="s">S</button><button class="keyboard-key" data-key="d">D</button><button class="keyboard-key" data-key="f">F</button><button class="keyboard-key" data-key="g">G</button><button class="keyboard-key" data-key="h">H</button><button class="keyboard-key" data-key="j">J</button><button class="keyboard-key" data-key="k">K</button><button class="keyboard-key" data-key="l">L</button><button class="keyboard-key" data-key=";">;</button><button class="keyboard-key" data-key="'">'</button><button class="keyboard-key extra-wide" data-key="enter">Enter</button>
+        </div>
+        <div class="keyboard-row">
+          <button class="keyboard-key modifier extra-wide" data-modifier="shift">Shift</button><button class="keyboard-key" data-key="z">Z</button><button class="keyboard-key" data-key="x">X</button><button class="keyboard-key" data-key="c">C</button><button class="keyboard-key" data-key="v">V</button><button class="keyboard-key" data-key="b">B</button><button class="keyboard-key" data-key="n">N</button><button class="keyboard-key" data-key="m">M</button><button class="keyboard-key" data-key=",">,</button><button class="keyboard-key" data-key=".">.</button><button class="keyboard-key" data-key="/">/</button><button class="keyboard-key modifier extra-wide" data-modifier="shift">Shift</button>
+        </div>
+        <div class="keyboard-row bottom-row">
+          <button class="keyboard-key modifier" data-modifier="ctrl">Ctrl</button><button class="keyboard-key modifier" data-modifier="win">Win</button><button class="keyboard-key modifier" data-modifier="alt">Alt</button><button class="keyboard-key space-key" data-key="space">Space</button><button class="keyboard-key" data-key="left">←</button><button class="keyboard-key" data-key="up">↑</button><button class="keyboard-key" data-key="down">↓</button><button class="keyboard-key" data-key="right">→</button>
+        </div>
+      </div>
+    </section>
 
     <div class="panel-backdrop" id="panel-backdrop" hidden></div>
     <aside class="settings-panel" id="settings-panel" aria-hidden="true" aria-label="设备信息">
