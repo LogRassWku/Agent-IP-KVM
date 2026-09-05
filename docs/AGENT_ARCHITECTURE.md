@@ -63,3 +63,21 @@ KVM 模式继续提供给用户的实时 MJPEG 画面。进入 Agent 模式后�
 ## 7. 推荐的首个 Agent 闭环
 
 先不执行 BIOS 写入。用已采集的 `data/controlled-host.json` 和固定的 Windows 桌面截图做一个离线闭环：用户提交任务 → Agent 生成结构化计划 → 页面显示风险与审批卡 → 模拟 HID 动作 → 取得新截图 → 显示验证结果。这个闭环通过后，再把同一套策略接到真实 HID，最后才增加 BIOS 页面识别和可恢复设置任务。
+
+## 8. 无 BIOS 视频时的启动与系统安装
+
+当前 Lenovo 83DF 测试笔记本在 Windows 运行阶段能够通过 UGREEN 25854 输出 HDMI 画面；重启后进入 BIOS，采集卡在 1920×1080@60 和 1280×720@60 均返回 `No Signal`。这证明采集链路在操作系统阶段正常，但不能把 BIOS 黑屏误判为目标已经完成启动。后续测试已将采集参数恢复为 1920×1080@30。
+
+BIOS 视频不可用时，Agent 仍可在目标操作系统运行期间读取和编排启动项，但不能可靠地盲操作固件菜单。Windows 的 `bcdedit /enum firmware /v` 用于读取固件应用；`{fwbootmgr}` 的 `bootsequence` 可设置下一次启动项，`displayorder` 才是持久顺序。`shutdown /r /fw /t 0` 只负责请求下一次进入固件界面，不能代替画面验证。Windows Boot Manager 的 BCD 菜单和 UEFI 的 NVRAM `BootOrder` 必须分别记录和恢复。
+
+系统安装模式采用以下流程：
+
+1. 开发板从专用 USB 存储或独立数据分区读取 ISO，先计算 SHA-256；板端现有只读 Mass Storage 可用于提供安装介质，但不能把正在使用的系统分区直接暴露为可写磁盘。
+2. PC Agent 以只读方式采集固件启动项、Secure Boot、BitLocker、ESP、物理磁盘和分区信息，并创建带目标磁盘序列号、镜像摘要和恢复方法的计划。
+3. 用户明确批准后，PC Agent 备份 BCD 和当前启动顺序，注册或选择一次性启动项；不能依赖未验证的 `bcdedit /create /application firmware` 语法，也不能覆盖 `\\EFI\\Microsoft\\Boot\\bootmgfw.efi`。
+4. 开发板在重启窗口呈现只读虚拟安装介质；HID 只执行白名单动作。安装器尽量使用 Windows unattend 或 Linux autoinstall，减少无画面阶段的交互。
+5. 安装完成后验证新系统启动并删除临时启动项；超时、目标身份变化、磁盘布局不符或安装器异常时停止，保留 Windows Boot Manager 作为回退。
+
+如果目标已经运行 Linux，则可在目标系统内使用 `grub-install` 将 GRUB 写入 EFI System Partition，再用 `efibootmgr` 调整 `BootOrder`；应保留 Windows 项并优先使用签名 shim 处理 Secure Boot。开发板是 ARM64，不能直接在板端运行目标 x86_64 的 `grub-install`，这部分必须由目标 PC Agent 或目标的 Linux 启动环境完成。
+
+因此，第一阶段应实现“读取固件启动项 → 生成一次性启动计划 → 备份与回滚”的只读／模拟闭环；在没有固件视频证据时，不允许 Agent 直接执行清盘、分区或永久改变启动顺序。
