@@ -1,6 +1,15 @@
 """Platform-independent HID adapters and USB Gadget discovery helpers."""
 
 from .base import HidAdapter, HidError, HidState, HidStoppedError, MouseButton
+from .config_plan import (
+    CompositeGadgetPlan,
+    HidConfigPlanError,
+    HidFunctionPlan,
+    KEYBOARD_FUNCTION,
+    MOUSE_FUNCTION,
+    build_composite_gadget_plan,
+)
+from .descriptors import BOOT_KEYBOARD_REPORT_DESCRIPTOR, RELATIVE_MOUSE_REPORT_DESCRIPTOR
 
 from .probe import (
     GadgetInfo,
@@ -13,16 +22,24 @@ from .simulated import SimulatedHidAdapter, SimulatedHidEvent, SimulatedEventKin
 
 __all__ = [
     "GadgetInfo",
+    "BOOT_KEYBOARD_REPORT_DESCRIPTOR",
+    "CompositeGadgetPlan",
     "HidAdapter",
     "HidError",
+    "HidConfigPlanError",
+    "HidFunctionPlan",
     "HidProbeReport",
     "HidProbeStatus",
     "HidState",
     "HidStoppedError",
     "MouseButton",
+    "KEYBOARD_FUNCTION",
+    "MOUSE_FUNCTION",
+    "RELATIVE_MOUSE_REPORT_DESCRIPTOR",
     "SimulatedEventKind",
     "SimulatedHidAdapter",
     "SimulatedHidEvent",
     "UdcInfo",
+    "build_composite_gadget_plan",
     "probe_usb_hid",
 ]

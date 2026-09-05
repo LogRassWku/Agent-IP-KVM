@@ -70,6 +70,14 @@ PYTHONPATH=src python -m agent_ip_kvm.hid_cli
 
 RDK X5 实测状态为 `in_use`：控制器 `35300000.usb` 已绑定 `RNDIS`、`ECM` 和只读存储功能，当前 USB QuickLink 管理连接依赖其中的网络功能。因此实际接入键鼠前，需要先设计保留管理网络的复合 Gadget 配置和断线恢复方法。
 
+生成标准键盘和鼠标的离线复合配置清单：
+
+```bash
+PYTHONPATH=src python -m agent_ip_kvm.hid_cli --plan-composite
+```
+
+输出中的 `generated_only` 始终为 `true`。清单包含标准描述符、报告长度、校验值、需要保留的现有功能和重绑风险，但不会写入 ConfigFS。RDK X5 实测计划保留 `ECM`、只读存储和 `RNDIS`，再增加独立的 Boot Keyboard 与相对鼠标功能。
+
 ## 启动最小 Web 界面
 
 页面骨架能够显示视频源状态、固定顶部工具栏和设备信息面板：

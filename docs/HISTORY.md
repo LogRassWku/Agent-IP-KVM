@@ -178,6 +178,14 @@
 - 根据实机页面反馈，顶部栏删除可见的 `Agent IP KVM` 标题，只保留右侧视频工具按钮；修改已部署至 RDK X5 预览。
 - 新增四项 HID 生命周期测试后，项目自动测试总数为二十一项，全部通过。
 
+## 2026-09-05：标准 HID 描述符和离线复合配置完成
+
+- 加入标准 8 字节 USB Boot Keyboard 报告描述符，以及支持五个按钮、X／Y 相对移动和垂直滚轮的 4 字节鼠标报告描述符。
+- 加入只输出 JSON 的复合 Gadget 配置生成器。输出包含描述符长度、SHA-256、ConfigFS 参数、现有功能、计划功能和重绑风险，不包含执行或写入逻辑。
+- RDK X5 实机生成计划保留 `ecm.0`、`mass_storage.0`、`rndis.0`，并增加 `hid.keyboard`、`hid.mouse`；计划正确标记 `requires_rebind: true` 和 `requires_local_recovery: true`。
+- 实机生成期间未写入 ConfigFS，UDC 和 USB QuickLink 管理连接保持原状。
+- 新增两项描述符与配置计划测试后，项目自动测试总数为二十三项，全部通过。
+
 ## 下一条记录
 
 发生以下任一事件时追加记录：
