@@ -84,6 +84,27 @@ class AgentControlTests(unittest.TestCase):
         self.assertEqual(plan["risk"], "high")
         self.assertEqual(plan["status"], "pending_approval")
 
+    def test_typed_text_is_validated_and_requires_approval(self) -> None:
+        plan = self.coordinator.create_plan(
+            {
+                "objective": "在当前输入框键入 hello",
+                "actions": [{"type": "type_text", "text": "hello"}],
+            }
+        )
+        self.assertEqual(plan["risk"], "low")
+        self.assertEqual(plan["status"], "pending_approval")
+        self.coordinator.approve({"plan_id": plan["plan_id"], "digest": plan["digest"]})
+        completed = self.coordinator.execute({"plan_id": plan["plan_id"]})
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["result"][0]["result"]["characters"], 5)
+        with self.assertRaises(ValueError):
+            self.coordinator.create_plan(
+                {
+                    "objective": "输入中文",
+                    "actions": [{"type": "type_text", "text": "你好"}],
+                }
+            )
+
     def test_pairing_token_and_pc_suggestion_cache(self) -> None:
         token_path = self.root / "token"
         token_path.write_text("a" * 32, encoding="utf-8")

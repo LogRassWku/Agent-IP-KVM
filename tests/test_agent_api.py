@@ -39,6 +39,48 @@ class SnapshotStream:
         return None
 
 
+class ScriptedRemoteModel:
+    def __init__(self):
+        self.responses = []
+        self.requests = []
+
+    def public(self):
+        return {"provider": "DeepSeek", "model": "deepseek-v4-flash", "configured": True}
+
+    def chat(self, messages, *, timeout=90, tools=None, tool_choice="auto"):
+        self.requests.append({"messages": messages, "tools": tools, "tool_choice": tool_choice})
+        if not self.responses:
+            raise AssertionError("unexpected remote model call")
+        return self.responses.pop(0)
+
+
+def tool_call_response(name, arguments, call_id="call-1"):
+    tool_calls = [
+        {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
+        }
+    ]
+    return {
+        "content": "",
+        "model": "deepseek-v4-flash",
+        "usage": None,
+        "tool_calls": tool_calls,
+        "message": {"role": "assistant", "content": None, "tool_calls": tool_calls},
+    }
+
+
+def text_response(content):
+    return {
+        "content": content,
+        "model": "deepseek-v4-flash",
+        "usage": None,
+        "tool_calls": [],
+        "message": {"role": "assistant", "content": content},
+    }
+
+
 class AgentApiTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -55,12 +97,14 @@ class AgentApiTests(unittest.TestCase):
         )
         self.adapter = SimulatedHidAdapter()
         self.controller = HidWebController(self.adapter, backend="simulated")
+        self.remote_model = ScriptedRemoteModel()
         self.server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
             create_handler(
                 config,
                 stream_provider=SnapshotStream(),
                 hid_controller=self.controller,
+                remote_model_store=self.remote_model,
             ),
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -118,7 +162,60 @@ class AgentApiTests(unittest.TestCase):
         self.assertIn("/home/sunrise/agent-ip-kvm-app", prompt)
         self.assertIn("TARGET", prompt)
         self.assertIn("v4l2", prompt)
-        self.assertIn("必须先给出目标、步骤、风险", prompt)
+        self.assertIn("必须调用 capture_screen", prompt)
+        self.assertIn("调用 propose_hid_actions", prompt)
+        self.assertIn("等待网页审批", prompt)
+
+    def test_remote_agent_can_capture_screen_through_a_read_only_tool(self):
+        self.remote_model.responses = [
+            tool_call_response("capture_screen", {"purpose": "查看当前界面"}),
+            text_response("已取得当前屏幕；识别结果为测试画面。"),
+        ]
+
+        _, result = self.post(
+            "/api/agent/chat",
+            {"messages": [{"role": "user", "content": "看看当前屏幕"}]},
+        )
+
+        self.assertEqual(result["response"]["tool_count"], 1)
+        self.assertEqual(result["plans"], [])
+        names = {
+            item["function"]["name"] for item in self.remote_model.requests[0]["tools"]
+        }
+        self.assertEqual(
+            names,
+            {"get_controlled_host_info", "get_kvm_status", "capture_screen", "propose_hid_actions"},
+        )
+        tool_message = self.remote_model.requests[1]["messages"][-1]
+        self.assertEqual(tool_message["role"], "tool")
+        self.assertIn("test_pattern", tool_message["content"])
+
+    def test_remote_agent_hid_tool_creates_approval_card_before_input(self):
+        self.remote_model.responses = [
+            tool_call_response(
+                "propose_hid_actions",
+                {
+                    "objective": "打开开始菜单",
+                    "actions": [{"type": "key_tap", "key": "win", "modifiers": []}],
+                },
+            ),
+            text_response("已创建按键计划，正在等待你的批准。"),
+        ]
+
+        _, result = self.post(
+            "/api/agent/chat",
+            {"messages": [{"role": "user", "content": "帮我打开开始菜单"}]},
+        )
+
+        plan = result["plans"][0]
+        self.assertEqual(plan["status"], "pending_approval")
+        self.assertEqual(len(self.adapter.events), 0)
+        self.post(
+            "/api/agent/approve",
+            {"plan_id": plan["plan_id"], "digest": plan["digest"]},
+        )
+        self.post("/api/agent/execute", {"plan_id": plan["plan_id"]})
+        self.assertGreater(len(self.adapter.events), 0)
 
     def test_snapshot_and_authenticated_pc_agent_relay(self):
         with urlopen(self.base_url + "/api/video/snapshot.jpg", timeout=2) as response:

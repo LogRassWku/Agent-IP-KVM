@@ -105,23 +105,64 @@ class RemoteModelStore:
                 pass
         return self.public()
 
-    def chat(self, messages: list[dict[str, str]], *, timeout: float = 90.0) -> dict[str, object]:
-        if not isinstance(messages, list) or not messages or len(messages) > 30:
-            raise RemoteModelError("messages must contain 1 to 30 items")
-        clean: list[dict[str, str]] = []
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        timeout: float = 90.0,
+        tools: list[dict[str, object]] | None = None,
+        tool_choice: str = "auto",
+    ) -> dict[str, object]:
+        if not isinstance(messages, list) or not messages or len(messages) > 48:
+            raise RemoteModelError("messages must contain 1 to 48 items")
+        clean: list[dict[str, Any]] = []
         for message in messages:
-            if not isinstance(message, dict) or message.get("role") not in {"system", "user", "assistant"}:
+            if not isinstance(message, dict) or message.get("role") not in {"system", "user", "assistant", "tool"}:
                 raise RemoteModelError("messages contain an unsupported role")
+            role = str(message["role"])
             content = message.get("content")
-            if not isinstance(content, str) or not content.strip() or len(content) > 12000:
+            max_content = 32000 if role in {"system", "tool"} else 12000
+            tool_calls = self._clean_tool_calls(message.get("tool_calls")) if role == "assistant" else []
+            if content is not None and (not isinstance(content, str) or len(content) > max_content):
                 raise RemoteModelError("message content is invalid")
-            clean.append({"role": str(message["role"]), "content": content})
+            if role != "assistant" and (not isinstance(content, str) or not content.strip()):
+                raise RemoteModelError("message content is invalid")
+            if role == "assistant" and not tool_calls and (not isinstance(content, str) or not content.strip()):
+                raise RemoteModelError("assistant message must contain content or tool calls")
+            item: dict[str, Any] = {"role": role, "content": content}
+            if role == "assistant" and tool_calls:
+                item["tool_calls"] = tool_calls
+            if role == "tool":
+                tool_call_id = message.get("tool_call_id")
+                if not isinstance(tool_call_id, str) or not tool_call_id or len(tool_call_id) > 128:
+                    raise RemoteModelError("tool message requires a valid tool_call_id")
+                item["tool_call_id"] = tool_call_id
+            clean.append(item)
+        if tools is not None:
+            if not isinstance(tools, list) or not tools or len(tools) > 16:
+                raise RemoteModelError("tools must contain 1 to 16 definitions")
+            if tool_choice not in {"auto", "none", "required"}:
+                raise RemoteModelError("unsupported tool choice")
+            try:
+                encoded_tools = json.dumps(tools, ensure_ascii=False)
+            except (TypeError, ValueError) as exc:
+                raise RemoteModelError("tools are not JSON serializable") from exc
+            if len(encoded_tools) > 64000:
+                raise RemoteModelError("tool definitions are too large")
         with self._lock:
             config = dict(self._config)
         if not config.get("api_key"):
             raise RemoteModelError("remote model is not configured")
         endpoint = config["base_url"] + "/chat/completions"
-        body = json.dumps({"model": config["model"], "messages": clean, "stream": False}, ensure_ascii=False).encode("utf-8")
+        payload: dict[str, object] = {
+            "model": config["model"],
+            "messages": clean,
+            "stream": False,
+        }
+        if tools is not None:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             endpoint,
             data=body,
@@ -138,12 +179,58 @@ class RemoteModelStore:
             raise RemoteModelError(f"remote API connection failed: {exc}") from exc
         try:
             result: Any = json.loads(raw.decode("utf-8"))
-            content = result["choices"][0]["message"]["content"]
+            response_message = result["choices"][0]["message"]
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise RemoteModelError("remote API returned an invalid chat response") from exc
-        if not isinstance(content, str):
-            raise RemoteModelError("remote API response content is not text")
-        return {"content": content, "model": result.get("model", config["model"]), "usage": result.get("usage")}
+        if not isinstance(response_message, dict):
+            raise RemoteModelError("remote API returned an invalid assistant message")
+        content = response_message.get("content")
+        tool_calls = self._clean_tool_calls(response_message.get("tool_calls"))
+        if content is not None and not isinstance(content, str):
+            raise RemoteModelError("remote API response content is invalid")
+        if not tool_calls and (not isinstance(content, str) or not content.strip()):
+            raise RemoteModelError("remote API response contains neither text nor tool calls")
+        clean_message: dict[str, object] = {"role": "assistant", "content": content}
+        if tool_calls:
+            clean_message["tool_calls"] = tool_calls
+        return {
+            "content": content or "",
+            "model": result.get("model", config["model"]),
+            "usage": result.get("usage"),
+            "tool_calls": tool_calls,
+            "message": clean_message,
+        }
+
+    @staticmethod
+    def _clean_tool_calls(value: object) -> list[dict[str, object]]:
+        if value is None:
+            return []
+        if not isinstance(value, list) or len(value) > 8:
+            raise RemoteModelError("remote API returned invalid tool calls")
+        clean: list[dict[str, object]] = []
+        for call in value:
+            if not isinstance(call, dict) or call.get("type") != "function":
+                raise RemoteModelError("remote API returned an unsupported tool call")
+            call_id = call.get("id")
+            function = call.get("function")
+            if not isinstance(call_id, str) or not call_id or len(call_id) > 128:
+                raise RemoteModelError("remote API returned an invalid tool call id")
+            if not isinstance(function, dict):
+                raise RemoteModelError("remote API returned an invalid tool function")
+            name = function.get("name")
+            arguments = function.get("arguments")
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+                raise RemoteModelError("remote API returned an invalid tool name")
+            if not isinstance(arguments, str) or len(arguments) > 12000:
+                raise RemoteModelError("remote API returned invalid tool arguments")
+            clean.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments},
+                }
+            )
+        return clean
 
     @staticmethod
     def _valid_base_url(value: str) -> bool:
@@ -178,4 +265,3 @@ class RemoteModelStore:
             os.chmod(self.path, 0o600)
         except OSError:
             pass
-

@@ -884,6 +884,241 @@ def observe_stream(stream: StreamProvider, config: WebConfig) -> dict[str, objec
     return {"frame": metadata, "recognition": recognition}
 
 
+REMOTE_AGENT_TOOLS: list[dict[str, object]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_controlled_host_info",
+            "description": (
+                "读取开发板缓存的被控主机只读清单，包括操作系统、整机型号、BIOS、CPU、GPU、"
+                "内存、物理磁盘、分区、卷和网络地址。回答硬件或系统事实前使用。"
+            ),
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_kvm_status",
+            "description": (
+                "读取当前视频流和 USB HID 的连接状态。它只能说明链路是否可用，不能代替屏幕截图。"
+            ),
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_screen",
+            "description": (
+                "请求开发板从采集卡按需取得当前屏幕的一帧，并返回帧元数据和现有识别器的结果。"
+                "用户询问当前屏幕、界面状态或动作结果时使用；识别结果为 unknown 时必须如实说明。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "purpose": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "本次截图用于回答什么问题",
+                    }
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_hid_actions",
+            "description": (
+                "向当前被控主机提出经过校验的 USB HID 键盘动作计划。此工具只创建计划；"
+                "按键和文本输入会在网页显示审批卡，用户批准后才执行。不能用于任意 Shell、鼠标或磁盘直写。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objective": {
+                        "type": "string",
+                        "maxLength": 1000,
+                        "description": "用户要求完成的具体目标",
+                    },
+                    "target": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "目标设备，通常为当前已连接的被控主机",
+                    },
+                    "actions": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["key_tap", "type_text", "wait", "release_all"],
+                                },
+                                "key": {
+                                    "type": "string",
+                                    "maxLength": 20,
+                                    "description": "标准键名，例如 win、enter、f2、esc、a",
+                                },
+                                "modifiers": {
+                                    "type": "array",
+                                    "maxItems": 4,
+                                    "items": {"type": "string", "enum": ["ctrl", "shift", "alt", "win"]},
+                                },
+                                "text": {
+                                    "type": "string",
+                                    "maxLength": 512,
+                                    "description": "通过美式键盘布局输入的可打印 ASCII 文本",
+                                },
+                                "seconds": {"type": "number", "minimum": 0, "maximum": 2},
+                            },
+                            "required": ["type"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["objective", "actions"],
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
+
+def run_remote_agent_chat(
+    remote_model: RemoteModelStore,
+    conversation: list[dict[str, object]],
+    system_prompt: str,
+    *,
+    host_info_getter: Callable[[], dict[str, object]],
+    stream_status_getter: Callable[[], dict[str, object]],
+    hid_status_getter: Callable[[], dict[str, object]],
+    agent: AgentCoordinator,
+    audit: AuditLog,
+) -> dict[str, object]:
+    """Run a bounded model/tool loop without granting the model direct device access."""
+    transcript: list[dict[str, object]] = [
+        {"role": "system", "content": system_prompt},
+        *conversation,
+    ]
+    plans: list[dict[str, object]] = []
+    tool_events: list[dict[str, object]] = []
+    for _ in range(5):
+        response = remote_model.chat(transcript, tools=REMOTE_AGENT_TOOLS, tool_choice="auto")
+        calls = response.get("tool_calls", [])
+        if not isinstance(calls, list):
+            raise RemoteModelError("remote API returned invalid tool calls")
+        if not calls:
+            return {
+                "response": {
+                    "content": response["content"],
+                    "model": response["model"],
+                    "usage": response.get("usage"),
+                    "tool_count": len(tool_events),
+                },
+                "plans": plans,
+                "tool_events": tool_events,
+            }
+        assistant_message = response.get("message")
+        if not isinstance(assistant_message, dict):
+            raise RemoteModelError("remote API omitted its tool-call message")
+        transcript.append(assistant_message)
+        for call in calls:
+            if not isinstance(call, dict):
+                raise RemoteModelError("remote API returned an invalid tool call")
+            call_id = call.get("id")
+            function = call.get("function")
+            if not isinstance(call_id, str) or not isinstance(function, dict):
+                raise RemoteModelError("remote API returned an invalid tool call")
+            name = function.get("name")
+            raw_arguments = function.get("arguments")
+            try:
+                arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else None
+            except json.JSONDecodeError:
+                arguments = None
+            if not isinstance(name, str) or not isinstance(arguments, dict):
+                result: dict[str, object] = {"ok": False, "error": "工具参数不是有效的 JSON 对象"}
+            else:
+                try:
+                    if name == "get_controlled_host_info":
+                        if arguments:
+                            raise ValueError("get_controlled_host_info does not accept arguments")
+                        result = {"ok": True, "controlled_host": host_info_getter()}
+                    elif name == "get_kvm_status":
+                        if arguments:
+                            raise ValueError("get_kvm_status does not accept arguments")
+                        result = {
+                            "ok": True,
+                            "video": stream_status_getter(),
+                            "hid": hid_status_getter(),
+                        }
+                    elif name == "capture_screen":
+                        purpose = arguments.get("purpose", "读取当前屏幕")
+                        if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > 200:
+                            raise ValueError("capture_screen purpose must be a short string")
+                        created = agent.create_plan(
+                            {
+                                "objective": f"只读截图：{purpose.strip()}",
+                                "model": "remote-api",
+                                "actions": [{"type": "observe"}],
+                            }
+                        )
+                        executed = agent.execute({"plan_id": created["plan_id"]})
+                        result = {"ok": True, "observation": executed["result"][0]["result"]}
+                    elif name == "propose_hid_actions":
+                        objective = arguments.get("objective")
+                        actions = arguments.get("actions")
+                        target = arguments.get("target", "当前已连接的被控主机")
+                        plan = agent.create_plan(
+                            {
+                                "objective": objective,
+                                "model": "remote-api",
+                                "actions": actions,
+                                "target": target,
+                            }
+                        )
+                        if not plan["approval_required"]:
+                            plan = agent.execute({"plan_id": plan["plan_id"]})
+                        plans.append(plan)
+                        result = {
+                            "ok": True,
+                            "plan_id": plan["plan_id"],
+                            "status": plan["status"],
+                            "risk": plan["risk"],
+                            "summary": plan["summary"],
+                            "approval_required": plan["approval_required"],
+                        }
+                    else:
+                        raise ValueError(f"unknown remote Agent tool: {name}")
+                except (AgentControlError, HidError, VideoSourceError, ValueError, TypeError) as exc:
+                    result = {"ok": False, "error": str(exc)}
+            audit.record(
+                "remote_agent_tool_called",
+                tool=name if isinstance(name, str) else "invalid",
+                ok=bool(result.get("ok")),
+                plan_id=result.get("plan_id"),
+            )
+            tool_events.append(
+                {
+                    "tool": name if isinstance(name, str) else "invalid",
+                    "ok": bool(result.get("ok")),
+                    "plan_id": result.get("plan_id"),
+                }
+            )
+            transcript.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": json.dumps(result, ensure_ascii=False, separators=(",", ":"))[:30000],
+                }
+            )
+    raise RemoteModelError("remote Agent exceeded the maximum of five tool rounds")
+
+
 def build_remote_agent_system_prompt(
     config: WebConfig,
     host_status: dict[str, object],
@@ -897,17 +1132,31 @@ def build_remote_agent_system_prompt(
     # Keep the prompt bounded while retaining the detailed disk and device data.
     host_json = json.dumps(host_data, ensure_ascii=False, separators=(",", ":"))[:24000]
     return (
-        "你是 Agent IP KVM 的远程模型，运行在一块 Linux ARM64 开发板的服务端代理中。\n"
-        "你的职责是帮助用户理解并规划对被控电脑的操作；不要把自己描述成普通云端聊天机器人。\n"
-        f"开发板项目目录：/home/sunrise/agent-ip-kvm-app（配置和主机清单位于该目录的 data/ 下）；视频后端：{config.source_kind}。\n"
-        f"当前视频源状态：{json.dumps(stream_status, ensure_ascii=False, separators=(',', ':'))[:2000]}\n"
-        f"当前 HID 状态：{json.dumps(hid_status, ensure_ascii=False, separators=(',', ':'))[:1000]}\n"
-        "开发板已经缓存了下面这份被控主机只读清单。回答系统、CPU、GPU、内存、磁盘、分区、BIOS 等问题时，优先使用这份清单；"
-        "不要声称需要用户在开发板上手动查文件，也不要编造未提供的字段。\n"
-        f"被控主机清单（controlled-host.json）：{host_json}\n"
-        "当前远程模型只能生成说明和建议，不能绕过开发板策略直接发送键盘、鼠标、Shell、BIOS 或磁盘操作。"
-        "涉及重启、安装、BIOS、分区、固件等高风险动作时，必须先给出目标、步骤、风险、预期结果和恢复方法，并明确等待用户批准。"
-        "如果缺少画面证据或主机字段，直说未知，并建议通过 KVM 按需截图或只读探针补充证据。"
+        "# 身份与环境\n"
+        "你是 Agent IP KVM 的远程规划模型，通过一块 Linux ARM64 开发板协助用户观察和控制当前被控电脑。"
+        "你不是普通聊天机器人，也不在被控电脑内部运行。开发板负责视频采集、USB HID、策略、审批和审计；"
+        "可选 PC Agent 负责操作系统内的信息采集与建议。\n"
+        f"开发板项目目录：/home/sunrise/agent-ip-kvm-app；数据目录：/home/sunrise/agent-ip-kvm-app/data；视频后端：{config.source_kind}。\n"
+        f"请求开始时的视频状态：{json.dumps(stream_status, ensure_ascii=False, separators=(',', ':'))[:2000]}\n"
+        f"请求开始时的 HID 状态：{json.dumps(hid_status, ensure_ascii=False, separators=(',', ':'))[:1000]}\n"
+        "下面是请求开始时缓存的被控主机清单。它可能不是实时数据；回答系统、CPU、GPU、内存、磁盘、分区或 BIOS 事实时，"
+        "应优先使用 get_controlled_host_info 获取最新缓存，不得编造缺失字段。\n"
+        f"被控主机清单快照（controlled-host.json）：{host_json}\n\n"
+        "# 工具使用规则\n"
+        "- 用户问当前屏幕显示什么、当前处于什么界面或动作是否成功时，必须调用 capture_screen；"
+        "不能从聊天记录、视频连接状态或旧截图猜测。若识别结果为 unknown，明确说明已经取得画面但当前文字模型不能理解画面内容。\n"
+        "- 用户问视频、采集卡或 HID 是否连接时，调用 get_kvm_status。连接状态不等于屏幕内容。\n"
+        "- 用户问被控电脑的系统和硬件时，调用 get_controlled_host_info。清单没有的字段回答未知。\n"
+        "- 用户要求按键、输入文本或操作被控电脑时，调用 propose_hid_actions 创建结构化计划。"
+        "工具返回 pending_approval 时，只能说明计划正在等待网页审批，不能声称动作已经执行。\n"
+        "- 不要在普通回复中伪造工具调用、计划编号、截图结果或执行成功；应直接调用可用工具。\n\n"
+        "# 操作与审批边界\n"
+        "所有键盘输入都由开发板执行并经过用户审批。你没有任意 Shell、PowerShell、磁盘、BIOS、固件或鼠标控制权限。"
+        "重启、安装、启动项、BIOS、分区、格式化、固件、安全启动和删除数据属于高风险操作：先说明目标、完整动作、风险、"
+        "预期结果和恢复方法，再通过工具提出计划并等待用户批准。目标、证据或动作改变后必须重新审批。"
+        "看不到画面、目标身份不明、HID 不可用或结果和预期不一致时停止继续操作，并说明缺少的证据。\n\n"
+        "# 回复方式\n"
+        "默认用简洁中文回答。先给当前结论或状态，再给必要步骤。清楚区分：缓存信息、实时工具结果、建议、等待审批、已执行。"
     )
 
 
@@ -1207,19 +1456,30 @@ def create_handler(
                     messages = payload.get("messages")
                     if not isinstance(messages, list):
                         raise RemoteModelError("messages must be an array")
-                    conversation = []
+                    conversation: list[dict[str, object]] = []
                     for message in messages:
                         if not isinstance(message, dict) or message.get("role") not in {"user", "assistant"}:
                             raise RemoteModelError("remote chat only accepts user and assistant messages")
-                        conversation.append(message)
+                        content = message.get("content")
+                        if not isinstance(content, str) or not content.strip():
+                            raise RemoteModelError("remote chat message content is invalid")
+                        conversation.append({"role": message["role"], "content": content})
                     system = build_remote_agent_system_prompt(
                         config,
                         host_info.status(),
                         stream.status(),
                         hid.status(),
                     )
-                    response = remote_model.chat([{"role": "system", "content": system}, *conversation])
-                    result = {"response": response}
+                    result = run_remote_agent_chat(
+                        remote_model,
+                        conversation,
+                        system,
+                        host_info_getter=host_info.status,
+                        stream_status_getter=stream.status,
+                        hid_status_getter=hid.status,
+                        agent=agent,
+                        audit=audit,
+                    )
                 elif path == "/api/agent/sessions":
                     saved = agent_sessions.upsert(payload.get("session"))
                     result = {"session": saved}

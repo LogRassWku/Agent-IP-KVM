@@ -609,6 +609,7 @@ function renderAgentPlan(plan) {
     const item = document.createElement("li");
     if (action.type === "observe") item.textContent = "截取一帧并识别画面状态";
     else if (action.type === "key_tap") item.textContent = `按下并释放 ${action.key}`;
+    else if (action.type === "type_text") item.textContent = `输入文本：${action.text}`;
     else if (action.type === "wait") item.textContent = `等待 ${action.seconds} 秒`;
     else item.textContent = "释放全部 HID 输入";
     actions.append(item);
@@ -728,7 +729,12 @@ async function submitAgentPrompt(prompt) {
         .filter((item) => (item.role === "user" || item.role === "assistant") && !item.modelSetup && !item.remoteModelSetup)
         .slice(-20).map((item) => ({ role: item.role, content: String(item.content ?? "") }));
       const response = await postJson("/api/agent/chat", { messages });
-      session.messages.push({ role: "assistant", content: response.response.content, createdAt: Date.now(), remoteModel: response.response.model });
+      if (String(response.response.content ?? "").trim()) {
+        session.messages.push({ role: "assistant", content: response.response.content, createdAt: Date.now(), remoteModel: response.response.model });
+      }
+      for (const plan of response.plans ?? []) {
+        session.messages.push({ role: "assistant", content: plan.summary, plan, createdAt: Date.now(), remoteModel: response.response.model });
+      }
     } else {
       const response = await postJson("/api/agent/plans", { objective: value, model: selectedAgentModel });
       const plan = response.plan;

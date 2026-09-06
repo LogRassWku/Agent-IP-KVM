@@ -400,6 +400,8 @@ class AgentCoordinator:
             return self._hid.tap_key(
                 {"key": action["key"], "modifiers": action.get("modifiers", [])}
             )
+        if kind == "type_text":
+            return self._hid.type_text(str(action["text"]))
         if kind == "wait":
             seconds = float(action["seconds"])
             time.sleep(seconds)
@@ -431,6 +433,18 @@ class AgentCoordinator:
                 ):
                     raise ValueError("key_tap modifiers are invalid")
                 actions.append({"type": kind, "key": key, "modifiers": modifiers})
+            elif kind == "type_text":
+                text = item.get("text")
+                if (
+                    not isinstance(text, str)
+                    or not text
+                    or len(text) > 512
+                    or any(not 32 <= ord(character) <= 126 for character in text)
+                ):
+                    raise ValueError("type_text requires 1 to 512 printable ASCII characters")
+                if set(item) != {"type", "text"}:
+                    raise ValueError("type_text does not accept extra fields")
+                actions.append({"type": kind, "text": text})
             elif kind == "wait":
                 seconds = item.get("seconds")
                 if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
@@ -456,6 +470,6 @@ class AgentCoordinator:
             return "critical"
         if any(word in lowered for word in self._HIGH_RISK_WORDS):
             return "high"
-        if any(action["type"] in {"key_tap"} for action in actions):
+        if any(action["type"] in {"key_tap", "type_text"} for action in actions):
             return "low"
         return "read_only"
