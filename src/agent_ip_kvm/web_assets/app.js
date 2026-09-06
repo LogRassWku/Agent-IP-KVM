@@ -578,7 +578,10 @@ function renderRemoteModelSetup(message) {
   modelLabel.append(modelSelect);
   const visionLabel = document.createElement("label"); visionLabel.textContent = "屏幕视觉";
   const visionSelect = document.createElement("select"); visionSelect.dataset.remoteField = "vision_model";
-  for (const model of setup.catalog?.vision_models ?? []) {
+  const visionModels = Array.isArray(setup.catalog?.vision_models) && setup.catalog.vision_models.length
+    ? setup.catalog.vision_models
+    : [{ id: "deepseek-v4-flash-vision-exp", name: "DeepSeek V4 Flash Vision Exp", description: "按需理解 KVM 截图" }];
+  for (const model of visionModels) {
     const option = document.createElement("option"); option.value = model.id;
     option.textContent = model.name; option.title = model.description;
     option.selected = model.id === (setup.visionModel || "deepseek-v4-flash-vision-exp"); visionSelect.append(option);
@@ -823,7 +826,7 @@ async function saveRemoteModelSetup(card) {
   const button = card.querySelector("[data-remote-setup-action='save']"); button.disabled = true;
   const baseUrl = card.querySelector("[data-remote-field='base_url']").value.trim();
   const model = card.querySelector("[data-remote-field='model']").value;
-  const visionModel = card.querySelector("[data-remote-field='vision_model']").value;
+  const visionModel = card.querySelector("[data-remote-field='vision_model']").value || "deepseek-v4-flash-vision-exp";
   const apiKey = card.querySelector("[data-remote-field='api_key']").value.trim();
   try {
     const saved = await postJson("/api/remote-model/config", { base_url: baseUrl, model, vision_model: visionModel, api_key: apiKey });

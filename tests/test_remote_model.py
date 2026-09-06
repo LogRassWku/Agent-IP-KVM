@@ -22,6 +22,29 @@ class RemoteModelStoreTests(unittest.TestCase):
         self.assertNotIn("api_key", self.store.catalog())
         self.assertEqual(saved["vision_model"], "deepseek-v4-flash-vision-exp")
 
+    def test_model_can_change_without_reentering_key_and_repairs_stale_vision_value(self):
+        key = "sk-" + "a" * 32
+        self.store.save(
+            {
+                "api_key": key,
+                "model": "deepseek-v4-flash",
+                "vision_model": "deepseek-v4-flash-vision-exp",
+                "base_url": "https://api.deepseek.com",
+            }
+        )
+        updated = self.store.save(
+            {
+                "api_key": "",
+                "model": "deepseek-v4-pro",
+                "vision_model": "",
+                "base_url": "https://api.deepseek.com",
+            }
+        )
+        self.assertEqual(updated["model"], "deepseek-v4-pro")
+        self.assertEqual(updated["vision_model"], "deepseek-v4-flash-vision-exp")
+        persisted = json.loads(self.store.path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["api_key"], key)
+
     def test_rejects_public_http_and_unknown_model(self):
         with self.assertRaises(RemoteModelError):
             self.store.save({"api_key": "sk-" + "x" * 28, "model": "deepseek-v4-flash", "base_url": "http://example.com"})

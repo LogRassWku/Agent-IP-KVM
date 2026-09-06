@@ -94,6 +94,8 @@ class RemoteModelStore:
         model = payload.get("model", "deepseek-v4-flash")
         vision_model = payload.get("vision_model", "deepseek-v4-flash-vision-exp")
         api_key = payload.get("api_key")
+        with self._lock:
+            current = dict(self._config)
         if not isinstance(base_url, str):
             raise RemoteModelError("base_url must be a string")
         base_url = base_url.strip().rstrip("/")
@@ -101,8 +103,12 @@ class RemoteModelStore:
             raise RemoteModelError("base_url must use HTTPS (or HTTP for a private LAN endpoint)")
         if not isinstance(model, str) or model not in _MODEL_IDS:
             raise RemoteModelError("unsupported remote model")
+        if not isinstance(vision_model, str) or not vision_model.strip():
+            vision_model = current.get("vision_model", "deepseek-v4-flash-vision-exp")
         if not isinstance(vision_model, str) or vision_model not in _VISION_MODEL_IDS:
             raise RemoteModelError("unsupported remote vision model")
+        if api_key is None or (isinstance(api_key, str) and not api_key.strip()):
+            api_key = current.get("api_key")
         if not isinstance(api_key, str) or not _KEY_RE.fullmatch(api_key.strip()):
             raise RemoteModelError("api_key must be a non-empty provider key")
         now = _utc_now()
