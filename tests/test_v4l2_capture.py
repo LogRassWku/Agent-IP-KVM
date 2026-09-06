@@ -1,7 +1,9 @@
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from agent_ip_kvm.video import FFmpegV4L2VideoSource, SourceHealth, VideoSourceError
 
@@ -64,6 +66,32 @@ class V4L2CaptureTests(unittest.TestCase):
         source = FFmpegV4L2VideoSource(platform_name="Windows")
         with self.assertRaisesRegex(VideoSourceError, "requires Linux"):
             source.open()
+
+    def test_times_out_when_capture_device_produces_no_frame(self) -> None:
+        read_fd, write_fd = os.pipe()
+        stdout = os.fdopen(read_fd, "rb", buffering=0)
+        process = FakeProcess(b"")
+        process.stdout = stdout
+
+        def process_factory(command, **kwargs):
+            return process
+
+        with tempfile.TemporaryDirectory() as directory:
+            device = Path(directory) / "video0"
+            device.touch()
+            source = FFmpegV4L2VideoSource(
+                device,
+                ffmpeg_path="ffmpeg",
+                frame_timeout=0.01,
+                process_factory=process_factory,
+                platform_name="Linux",
+            )
+            source.open()
+            source.start()
+            with patch("agent_ip_kvm.video.v4l2_capture.select.select", return_value=([], [], [])):
+                with self.assertRaisesRegex(VideoSourceError, "timed out"):
+                    source.next_frame()
+        os.close(write_fd)
 
 
 if __name__ == "__main__":

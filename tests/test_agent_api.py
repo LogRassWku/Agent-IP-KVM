@@ -218,7 +218,6 @@ class AgentApiTests(unittest.TestCase):
                     "actions": [{"type": "key_tap", "key": "win", "modifiers": []}],
                 },
             ),
-            text_response("已创建按键计划，正在等待你的批准。"),
         ]
 
         _, result = self.post(
@@ -228,6 +227,8 @@ class AgentApiTests(unittest.TestCase):
 
         plan = result["plans"][0]
         self.assertEqual(plan["status"], "pending_approval")
+        self.assertIn("审阅", result["response"]["content"])
+        self.assertEqual(len(self.remote_model.requests), 1)
         self.assertEqual(len(self.adapter.events), 0)
         self.post(
             "/api/agent/approve",

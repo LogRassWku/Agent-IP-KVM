@@ -731,12 +731,18 @@ async function submitAgentPrompt(prompt) {
   elements.agentInput.value = "";
   resizeAgentInput();
   elements.agentSend.disabled = true;
+  let progressMessage = null;
   try {
     if (selectedAgentModel === "remote-api") {
       const messages = session.messages
         .filter((item) => (item.role === "user" || item.role === "assistant") && !item.modelSetup && !item.remoteModelSetup)
         .slice(-20).map((item) => ({ role: item.role, content: String(item.content ?? "") }));
-      const response = await postJson("/api/agent/chat", { messages });
+      progressMessage = { role: "assistant", content: "正在分析并准备安全操作…", createdAt: Date.now(), transient: true };
+      session.messages.push(progressMessage);
+      renderAgentConversation();
+      const response = await postJson("/api/agent/chat", { messages }, { timeoutMs: 120000 });
+      session.messages = session.messages.filter((item) => item !== progressMessage);
+      progressMessage = null;
       if (String(response.response.content ?? "").trim()) {
         session.messages.push({ role: "assistant", content: response.response.content, createdAt: Date.now(), remoteModel: response.response.model });
       }
@@ -755,6 +761,7 @@ async function submitAgentPrompt(prompt) {
       }
     }
   } catch (error) {
+    if (progressMessage) session.messages = session.messages.filter((item) => item !== progressMessage);
     session.messages.push({ role: "assistant", content: `无法处理：${error.message}`, createdAt: Date.now() });
   } finally {
     session.updatedAt = Date.now(); saveAgentSessions(); renderAgentSessions(); renderAgentConversation();
@@ -949,8 +956,24 @@ async function toggleStickyKeys() {
   }
 }
 
-async function postJson(path, payload) {
-  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+async function postJson(path, payload, options = {}) {
+  const timeoutMs = Number(options.timeoutMs ?? 15000);
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`请求超过 ${Math.round(timeoutMs / 1000)} 秒，已停止等待`);
+    throw new Error("无法连接开发板服务，请检查网络后重试");
+  } finally {
+    window.clearTimeout(timer);
+  }
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
 }
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import platform
+import select
 import shutil
 import subprocess
 import time
@@ -26,11 +28,15 @@ class FFmpegV4L2VideoSource(VideoSource):
         height: int = 1080,
         fps: float = 30.0,
         ffmpeg_path: str | None = None,
+        frame_timeout: float = 8.0,
         process_factory: ProcessFactory | None = None,
         platform_name: str | None = None,
     ) -> None:
         self._path = Path(device_path)
         self._mode = SourceCapability(width, height, fps, "MJPEG")
+        if frame_timeout <= 0:
+            raise ValueError("frame_timeout must be positive")
+        self._frame_timeout = float(frame_timeout)
         self._ffmpeg_path = ffmpeg_path
         self._process_factory = process_factory or subprocess.Popen
         self._platform_name = platform_name or platform.system()
@@ -108,6 +114,7 @@ class FFmpegV4L2VideoSource(VideoSource):
         ):
             raise VideoSourceError("source is not streaming")
 
+        deadline = time.monotonic() + self._frame_timeout
         while True:
             start = self._buffer.find(b"\xff\xd8")
             end = self._buffer.find(b"\xff\xd9", max(start + 2, 0))
@@ -126,7 +133,7 @@ class FFmpegV4L2VideoSource(VideoSource):
                 self._sequence += 1
                 return frame
 
-            chunk = self._process.stdout.read(65536)
+            chunk = self._read_chunk(deadline)
             if not chunk:
                 self._health = SourceHealth.ERROR
                 message = self._read_process_error()
@@ -137,6 +144,29 @@ class FFmpegV4L2VideoSource(VideoSource):
             if len(self._buffer) > 16 * 1024 * 1024:
                 self._health = SourceHealth.ERROR
                 raise VideoSourceError("V4L2 capture produced an oversized frame")
+
+    def _read_chunk(self, deadline: float) -> bytes:
+        """Read without letting a missing HDMI signal block a request forever."""
+        if self._process is None or self._process.stdout is None:
+            raise VideoSourceError("source is not streaming")
+        stream = self._process.stdout
+        try:
+            descriptor = stream.fileno()
+        except (AttributeError, OSError, ValueError):
+            # In-memory streams used by tests are immediately readable.
+            return stream.read(65536)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            readable = []
+        else:
+            readable, _, _ = select.select([descriptor], [], [], remaining)
+        if not readable:
+            self._health = SourceHealth.ERROR
+            self._stop_process()
+            raise VideoSourceError(
+                f"V4L2 capture timed out after {self._frame_timeout:g} seconds waiting for a frame"
+            )
+        return os.read(descriptor, 65536)
 
     def stop(self) -> None:
         self._stop_process()
@@ -170,12 +200,18 @@ class FFmpegV4L2VideoSource(VideoSource):
     def _stop_process(self) -> None:
         if self._process is None:
             return
-        if self._process.poll() is None:
-            self._process.terminate()
+        process = self._process
+        if process.poll() is None:
+            process.terminate()
             try:
-                self._process.wait(timeout=2)
+                process.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait(timeout=2)
+                process.kill()
+                process.wait(timeout=2)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
         self._process = None
-

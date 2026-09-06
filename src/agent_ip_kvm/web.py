@@ -1015,7 +1015,12 @@ def run_remote_agent_chat(
     plans: list[dict[str, object]] = []
     tool_events: list[dict[str, object]] = []
     for _ in range(5):
-        response = remote_model.chat(transcript, tools=REMOTE_AGENT_TOOLS, tool_choice="auto")
+        response = remote_model.chat(
+            transcript,
+            timeout=30,
+            tools=REMOTE_AGENT_TOOLS,
+            tool_choice="auto",
+        )
         calls = response.get("tool_calls", [])
         if not isinstance(calls, list):
             raise RemoteModelError("remote API returned invalid tool calls")
@@ -1070,7 +1075,11 @@ def run_remote_agent_chat(
                         jpeg, observation = screen_capture_getter()
                         frame = observation.get("frame", {})
                         try:
-                            vision = remote_model.analyze_image(jpeg, purpose.strip())
+                            vision = remote_model.analyze_image(
+                                jpeg,
+                                purpose.strip(),
+                                timeout=45,
+                            )
                             result = {"ok": True, "frame": frame, "vision": vision}
                             analysis = vision.get("analysis", {})
                             audit.record(
@@ -1137,6 +1146,24 @@ def run_remote_agent_chat(
                     "content": json.dumps(result, ensure_ascii=False, separators=(",", ":"))[:30000],
                 }
             )
+        pending = next(
+            (plan for plan in plans if plan.get("status") == "pending_approval"),
+            None,
+        )
+        if pending is not None:
+            # The browser must receive the approval card immediately. Asking the
+            # model for another prose turn here can hide an already-created plan
+            # behind a slow network request for up to the full model timeout.
+            return {
+                "response": {
+                    "content": "操作计划已准备好，请在下方审阅并决定是否执行。",
+                    "model": response["model"],
+                    "usage": response.get("usage"),
+                    "tool_count": len(tool_events),
+                },
+                "plans": plans,
+                "tool_events": tool_events,
+            }
     raise RemoteModelError("remote Agent exceeded the maximum of five tool rounds")
 
 
