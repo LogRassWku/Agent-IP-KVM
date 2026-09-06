@@ -1334,7 +1334,7 @@ def create_handler(
                 self._send_json(remote_model.public())
                 return
             if path == "/api/agent/sessions":
-                self._send_json({"sessions": agent_sessions.list()})
+                self._send_json({"sessions": agent_sessions.list(), "deleted_session_ids": agent_sessions.deleted_ids()})
                 return
             if path == "/api/stream.mjpg":
                 self._send_mjpeg()

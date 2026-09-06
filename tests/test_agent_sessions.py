@@ -27,6 +27,17 @@ class AgentSessionStoreTests(unittest.TestCase):
         with self.assertRaises(AgentSessionError):
             self.store.upsert({**base, "messages": [{"role": "user", "content": "x" * 20001}]})
 
+    def test_delete_tombstone_persists_and_prevents_stale_restore(self):
+        session = {"id": "s1", "title": "测试", "createdAt": 1, "updatedAt": 2, "messages": []}
+        self.store.upsert(session)
+        self.store.delete("s1")
+        self.assertEqual(self.store.list(), [])
+        self.assertEqual(self.store.deleted_ids(), ["s1"])
+        restored = AgentSessionStore(self.store.path)
+        self.assertEqual(restored.deleted_ids(), ["s1"])
+        with self.assertRaises(AgentSessionError):
+            restored.upsert(session)
+
 
 if __name__ == "__main__":
     unittest.main()

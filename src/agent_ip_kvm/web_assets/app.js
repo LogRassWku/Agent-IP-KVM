@@ -46,6 +46,7 @@ const agentModelNames = {
   "remote-api": "远程 API",
 };
 let agentSessions = [];
+let deletedAgentSessionIds = new Set();
 let activeAgentSessionId = "";
 let selectedAgentModel = "qwen2.5-1.5b";
 let modelSetupPollActive = false;
@@ -358,13 +359,17 @@ function makeAgentSession() {
 
 function saveAgentSessions(sync = true) {
   try {
-    localStorage.setItem(agentStorageKey, JSON.stringify({ activeId: activeAgentSessionId, sessions: agentSessions }));
+    localStorage.setItem(agentStorageKey, JSON.stringify({
+      activeId: activeAgentSessionId,
+      sessions: agentSessions,
+      deletedIds: [...deletedAgentSessionIds],
+    }));
   } catch (_) { /* The interface remains usable if local storage is unavailable. */ }
   if (sync) for (const session of agentSessions) queueSessionSync(session);
 }
 
 function queueSessionSync(session) {
-  if (!session?.id) return;
+  if (!session?.id || deletedAgentSessionIds.has(session.id)) return;
   const oldTimer = pendingSessionSync.get(session.id);
   if (oldTimer) clearTimeout(oldTimer);
   const timer = window.setTimeout(async () => {
@@ -376,23 +381,39 @@ function queueSessionSync(session) {
 }
 
 function queueSessionDelete(sessionId) {
-  window.fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => { });
+  const oldTimer = pendingSessionSync.get(sessionId);
+  if (oldTimer) clearTimeout(oldTimer);
+  pendingSessionSync.delete(sessionId);
+  window.fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
+    .then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); })
+    .catch(() => { /* The persisted tombstone retries this deletion during synchronization. */ });
 }
 
 async function syncAgentSessionsFromBoard() {
   try {
     const result = await fetchJson("/api/agent/sessions");
     const remote = Array.isArray(result.sessions) ? result.sessions : [];
+    const remoteDeleted = new Set(Array.isArray(result.deleted_session_ids) ? result.deleted_session_ids : []);
+    for (const sessionId of remoteDeleted) deletedAgentSessionIds.add(sessionId);
+    agentSessions = agentSessions.filter((session) => !deletedAgentSessionIds.has(session.id));
     const byId = new Map(agentSessions.map((session) => [session.id, session]));
     for (const session of remote) {
+      if (deletedAgentSessionIds.has(session.id)) continue;
       const local = byId.get(session.id);
       if (!local || Number(session.updatedAt) >= Number(local.updatedAt)) byId.set(session.id, session);
     }
     for (const session of agentSessions) {
       if (!remote.some((item) => item.id === session.id)) queueSessionSync(session);
     }
+    for (const sessionId of deletedAgentSessionIds) {
+      if (!remoteDeleted.has(sessionId)) queueSessionDelete(sessionId);
+    }
     agentSessions = [...byId.values()].filter((session) => session && typeof session.id === "string");
-    if (agentSessions.length === 0) agentSessions.push(makeAgentSession());
+    if (agentSessions.length === 0) {
+      const session = makeAgentSession();
+      agentSessions.push(session);
+      queueSessionSync(session);
+    }
     if (!agentSessions.some((session) => session.id === activeAgentSessionId)) activeAgentSessionId = agentSessions[0].id;
     saveAgentSessions(false); renderAgentSessions(); renderAgentConversation();
   } catch (_) { /* The browser cache remains usable during a board reconnect. */ }
@@ -412,6 +433,8 @@ function loadAgentSessions() {
         }
       }
       activeAgentSessionId = typeof saved.activeId === "string" ? saved.activeId : "";
+      deletedAgentSessionIds = new Set(Array.isArray(saved.deletedIds) ? saved.deletedIds.filter((id) => typeof id === "string") : []);
+      agentSessions = agentSessions.filter((session) => !deletedAgentSessionIds.has(session.id));
     }
   } catch (_) { agentSessions = []; }
   if (agentSessions.length === 0) agentSessions.push(makeAgentSession());
@@ -708,10 +731,11 @@ function deleteAgentSession(sessionId) {
   const session = agentSessions.find((item) => item.id === sessionId);
   if (!session || !window.confirm(`删除会话“${session.title}”？`)) return;
   agentSessions = agentSessions.filter((item) => item.id !== sessionId);
+  deletedAgentSessionIds.add(sessionId);
   if (agentSessions.length === 0) agentSessions.push(makeAgentSession());
   if (activeAgentSessionId === sessionId) activeAgentSessionId = [...agentSessions].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
-  queueSessionDelete(sessionId);
   saveAgentSessions();
+  queueSessionDelete(sessionId);
   renderAgentSessions();
   renderAgentConversation();
 }

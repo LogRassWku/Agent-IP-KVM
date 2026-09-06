@@ -262,6 +262,13 @@ class AgentApiTests(unittest.TestCase):
         request = Request(self.base_url + "/api/agent/sessions/shared-1", method="DELETE")
         with urlopen(request, timeout=2) as response:
             self.assertEqual(response.status, 200)
+        with urlopen(self.base_url + "/api/agent/sessions", timeout=2) as response:
+            deleted = json.load(response)
+        self.assertEqual(deleted["sessions"], [])
+        self.assertIn("shared-1", deleted["deleted_session_ids"])
+        with self.assertRaises(HTTPError) as caught:
+            self.post("/api/agent/sessions", {"session": session})
+        self.assertEqual(caught.exception.code, 400)
 
     def test_model_setup_task_bootstrap_launch_and_authenticated_progress(self):
         status, created = self.post(
