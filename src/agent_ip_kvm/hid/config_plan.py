@@ -9,6 +9,7 @@ from .descriptors import (
     ABSOLUTE_POINTER_REPORT_DESCRIPTOR,
     BOOT_KEYBOARD_REPORT_DESCRIPTOR,
     RELATIVE_MOUSE_REPORT_DESCRIPTOR,
+    SYSTEM_CONTROL_REPORT_DESCRIPTOR,
 )
 from .probe import GadgetInfo, HidProbeReport, HidProbeStatus
 
@@ -64,6 +65,15 @@ POINTER_FUNCTION = HidFunctionPlan(
     subclass=0,
     report_length=6,
     report_descriptor=ABSOLUTE_POINTER_REPORT_DESCRIPTOR,
+)
+
+POWER_FUNCTION = HidFunctionPlan(
+    name="hid.power",
+    role="system_control",
+    protocol=0,
+    subclass=0,
+    report_length=1,
+    report_descriptor=SYSTEM_CONTROL_REPORT_DESCRIPTOR,
 )
 
 
@@ -132,6 +142,7 @@ def build_composite_gadget_plan(
                 KEYBOARD_FUNCTION.name,
                 MOUSE_FUNCTION.name,
                 POINTER_FUNCTION.name,
+                POWER_FUNCTION.name,
             )
         )
     )
@@ -153,7 +164,7 @@ def build_composite_gadget_plan(
         udc=udc,
         existing_functions=existing_functions,
         planned_functions=planned_functions,
-        hid_functions=(KEYBOARD_FUNCTION, MOUSE_FUNCTION, POINTER_FUNCTION),
+        hid_functions=(KEYBOARD_FUNCTION, MOUSE_FUNCTION, POINTER_FUNCTION, POWER_FUNCTION),
         retains_management_network=retains_management_network,
         requires_rebind=requires_rebind,
         requires_local_recovery=requires_local_recovery,

@@ -46,6 +46,9 @@ destination = Path(sys.argv[1])
 (destination / "pointer-report-desc.bin").write_bytes(bytes.fromhex(
     "05010902a1010901a1000509190129081500250195087501810205010930093116000026ff7f75109502810209381581257f750895018106c0c0"
 ))
+(destination / "system-control-report-desc.bin").write_bytes(bytes.fromhex(
+    "05010980a1011500250175019503098109820983810295058101c0"
+))
 PY
 chmod 0644 "$INSTALL_DIR"/*-report-desc.bin
 

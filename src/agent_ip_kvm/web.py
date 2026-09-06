@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -364,6 +365,87 @@ class HidWebController:
             adapter.arm()
         if adapter.state is not HidState.READY:
             raise HidError(f"HID is not ready: {adapter.state.value}")
+
+
+class UsbWakeController:
+    """Send a System Wake Up report through an optional HID Consumer endpoint."""
+
+    def __init__(
+        self,
+        gadget_root: Path = Path("/sys/kernel/config/usb_gadget/g_comp"),
+        dev_root: Path = Path("/dev"),
+        function_name: str = "hid.power",
+    ) -> None:
+        self._gadget_root = Path(gadget_root)
+        self._dev_root = Path(dev_root)
+        self._function_name = function_name
+        self._lock = threading.Lock()
+
+    def _resolve(self) -> Path:
+        try:
+            udc = (self._gadget_root / "UDC").read_text(encoding="ascii").strip()
+        except OSError as exc:
+            raise HidError("USB wake HID endpoint is not installed") from exc
+        if not udc:
+            raise HidError("USB wake endpoint is not bound")
+        try:
+            state = Path("/sys/class/udc", udc, "state").read_text(encoding="ascii").strip()
+        except OSError as exc:
+            raise HidError("USB wake endpoint state is unavailable") from exc
+        if state != "configured":
+            raise HidError("USB wake endpoint is not configured by the host")
+        function = self._gadget_root / "functions" / self._function_name
+        if not function.is_dir() or not any(
+            link.is_symlink()
+            for link in (self._gadget_root / "configs").glob(f"*/{self._function_name}")
+        ):
+            raise HidError("USB wake HID endpoint is not installed")
+        path = resolve_hidg_path(function, self._dev_root)
+        if not os.access(path, os.W_OK):
+            raise HidError("USB wake HID endpoint is not writable")
+        return path
+
+    def status(self) -> dict[str, object]:
+        try:
+            self._resolve()
+        except (OSError, HidError) as exc:
+            return {
+                "available": False,
+                "mode": "usb-wake",
+                "message": str(exc),
+            }
+        return {
+            "available": True,
+            "mode": "usb-wake",
+            "message": "USB 唤醒接口已就绪",
+        }
+
+    def wake(self, payload: dict[str, object]) -> dict[str, object]:
+        action = payload.get("action", "wake")
+        if action != "wake":
+            raise ValueError("unsupported power action")
+        path = self._resolve()
+        with self._lock:
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+                try:
+                    deadline = time.monotonic() + 0.35
+                    for report in (bytes((0x04,)), bytes((0x00,))):
+                        while True:
+                            try:
+                                os.write(fd, report)
+                                break
+                            except OSError as exc:
+                                if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                                    raise
+                                if time.monotonic() >= deadline:
+                                    raise
+                                time.sleep(0.005)
+                finally:
+                    os.close(fd)
+            except OSError as exc:
+                raise HidError(f"failed to send USB wake report: {exc}") from exc
+        return {"action": "wake", "transport": "usb-hid-system-control"}
 
 
 HidDeviceResolver = Callable[[], tuple[Path, Path | None, Path | None] | None]
@@ -840,6 +922,7 @@ def create_handler(
     stream_provider: StreamProvider | None = None,
     settings_updater: SettingsUpdater | None = None,
     hid_controller: HidWebController | None = None,
+    power_controller: UsbWakeController | None = None,
     host_info_store: HostInfoStore | None = None,
     audit_log: AuditLog | None = None,
     peer_authenticator: PeerTokenAuthenticator | None = None,
@@ -851,6 +934,7 @@ def create_handler(
 ) -> type[BaseHTTPRequestHandler]:
     stream = stream_provider or VideoStreamController(config)
     hid = hid_controller or HidWebController()
+    power = power_controller or UsbWakeController()
     host_info = host_info_store or HostInfoStore(config.host_info_path)
     audit = audit_log or AuditLog(config.audit_path)
     peer_auth = peer_authenticator or PeerTokenAuthenticator(config.pc_agent_token_path)
@@ -901,11 +985,7 @@ def create_handler(
                 }
                 payload["model_setup"] = {"latest": model_setup.latest()}
                 payload["remote_model"] = remote_model.public()
-                payload["power"] = {
-                    "available": False,
-                    "mode": "unconfigured",
-                    "message": "未连接主板 ATX PWR_SW/GPIO 控制线，当前只能显示入口",
-                }
+                payload["power"] = power.status()
                 self._send_json(payload)
                 return
             if path == "/api/video/snapshot.jpg":
@@ -1046,12 +1126,8 @@ def create_handler(
                     pause()
                     result = {"video": stream.status()}
                 elif path == "/api/power":
-                    audit.record("power_request_rejected", action=payload.get("action", "wake"), reason="power_control_unconfigured")
-                    self._send_json(
-                        {"error": "未配置电源控制线：请连接主板 ATX PWR_SW/GPIO，当前无法远程开机"},
-                        HTTPStatus.NOT_IMPLEMENTED,
-                    )
-                    return
+                    result = {"power": power.wake(payload)}
+                    audit.record("power_request_sent", action=payload.get("action", "wake"), transport="usb-hid-system-control")
                 elif path == "/api/hid/key":
                     result = {"hid": hid.tap_key(payload)}
                 elif path == "/api/hid/mouse-move":

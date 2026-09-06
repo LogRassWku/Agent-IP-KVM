@@ -6,7 +6,9 @@ from agent_ip_kvm.hid import (
     KEYBOARD_FUNCTION,
     MOUSE_FUNCTION,
     POINTER_FUNCTION,
+    POWER_FUNCTION,
     RELATIVE_MOUSE_REPORT_DESCRIPTOR,
+    SYSTEM_CONTROL_REPORT_DESCRIPTOR,
     GadgetInfo,
     HidProbeReport,
     HidProbeStatus,
@@ -20,9 +22,11 @@ class HidDescriptorTests(unittest.TestCase):
         self.assertEqual(KEYBOARD_FUNCTION.report_length, 8)
         self.assertEqual(MOUSE_FUNCTION.report_length, 4)
         self.assertEqual(POINTER_FUNCTION.report_length, 6)
+        self.assertEqual(POWER_FUNCTION.report_length, 1)
         self.assertEqual(len(BOOT_KEYBOARD_REPORT_DESCRIPTOR), 63)
         self.assertEqual(len(RELATIVE_MOUSE_REPORT_DESCRIPTOR), 52)
         self.assertEqual(len(ABSOLUTE_POINTER_REPORT_DESCRIPTOR), 58)
+        self.assertEqual(len(SYSTEM_CONTROL_REPORT_DESCRIPTOR), 27)
         self.assertEqual(BOOT_KEYBOARD_REPORT_DESCRIPTOR[-1], 0xC0)
         self.assertEqual(RELATIVE_MOUSE_REPORT_DESCRIPTOR[-2:], b"\xc0\xc0")
 
@@ -51,7 +55,7 @@ class CompositeGadgetPlanTests(unittest.TestCase):
         self.assertEqual(plan.gadget_name, "g_comp")
         self.assertEqual(
             plan.planned_functions,
-            ("ecm.0", "mass_storage.0", "rndis.0", "hid.keyboard", "hid.mouse", "hid.pointer"),
+            ("ecm.0", "mass_storage.0", "rndis.0", "hid.keyboard", "hid.mouse", "hid.pointer", "hid.power"),
         )
         self.assertTrue(plan.retains_management_network)
         self.assertTrue(plan.requires_rebind)

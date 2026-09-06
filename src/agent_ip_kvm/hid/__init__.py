@@ -7,6 +7,7 @@ from .config_plan import (
     HidFunctionPlan,
     KEYBOARD_FUNCTION,
     MOUSE_FUNCTION,
+    POWER_FUNCTION,
     POINTER_FUNCTION,
     build_composite_gadget_plan,
 )
@@ -14,6 +15,7 @@ from .descriptors import (
     ABSOLUTE_POINTER_REPORT_DESCRIPTOR,
     BOOT_KEYBOARD_REPORT_DESCRIPTOR,
     RELATIVE_MOUSE_REPORT_DESCRIPTOR,
+    SYSTEM_CONTROL_REPORT_DESCRIPTOR,
 )
 from .linux_gadget import (
     LinuxGadgetHidAdapter,
@@ -35,6 +37,7 @@ __all__ = [
     "GadgetInfo",
     "ABSOLUTE_POINTER_REPORT_DESCRIPTOR",
     "BOOT_KEYBOARD_REPORT_DESCRIPTOR",
+    "SYSTEM_CONTROL_REPORT_DESCRIPTOR",
     "CompositeGadgetPlan",
     "HidAdapter",
     "HidError",
@@ -48,6 +51,7 @@ __all__ = [
     "MouseButton",
     "KEYBOARD_FUNCTION",
     "MOUSE_FUNCTION",
+    "POWER_FUNCTION",
     "POINTER_FUNCTION",
     "RELATIVE_MOUSE_REPORT_DESCRIPTOR",
     "RecoveryBundle",

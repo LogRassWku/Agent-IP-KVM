@@ -139,7 +139,7 @@ class WebInterfaceTests(unittest.TestCase):
             self.assertEqual(payload["hid"]["state"], "disabled")
             self.assertFalse(payload["hid"]["enabled"])
             self.assertFalse(payload["power"]["available"])
-            self.assertEqual(payload["power"]["mode"], "unconfigured")
+            self.assertEqual(payload["power"]["mode"], "usb-wake")
 
     def test_power_endpoint_reports_unconfigured_hardware(self) -> None:
         request = Request(
@@ -150,9 +150,9 @@ class WebInterfaceTests(unittest.TestCase):
         )
         with self.assertRaises(HTTPError) as caught:
             urlopen(request, timeout=2)
-        self.assertEqual(caught.exception.code, 501)
+        self.assertEqual(caught.exception.code, 400)
         payload = json.load(caught.exception)
-        self.assertIn("电源控制线", payload["error"])
+        self.assertIn("USB wake", payload["error"])
 
     def test_hid_controller_taps_and_releases_one_key(self) -> None:
         adapter = SimulatedHidAdapter()

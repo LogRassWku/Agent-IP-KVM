@@ -73,6 +73,27 @@ RELATIVE_MOUSE_REPORT_DESCRIPTOR = bytes.fromhex(
 )
 
 
+# One-byte System Control report. Bit 2 is Wake Up (USB HID usage 0x83).
+# This is separate from the boot keyboard interface so operating systems can
+# decide whether the device is allowed to wake a sleeping host.
+SYSTEM_CONTROL_REPORT_DESCRIPTOR = bytes.fromhex(
+    "05 01"  # Usage Page (Generic Desktop)
+    "09 80"  # Usage (System Control)
+    "a1 01"  # Collection (Application)
+    "15 00"  # Logical Minimum (0)
+    "25 01"  # Logical Maximum (1)
+    "75 01"  # Report Size (1)
+    "95 03"  # Report Count (3)
+    "09 81"  # Usage (System Power Down)
+    "09 82"  # Usage (System Sleep)
+    "09 83"  # Usage (System Wake Up)
+    "81 02"  # Input (Data, Variable, Absolute)
+    "95 05"  # Report Count (5)
+    "81 01"  # Input (Constant)
+    "c0"     # End Collection
+)
+
+
 # Six-byte absolute pointer report: eight buttons, 16-bit X/Y, and vertical wheel.
 # X/Y use the full 0..32767 logical desktop range so a browser coordinate can be
 # mapped directly without relying on host pointer acceleration.

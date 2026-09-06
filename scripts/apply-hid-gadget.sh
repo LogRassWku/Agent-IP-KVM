@@ -11,6 +11,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 KEYBOARD_FUNCTION=hid.keyboard
 MOUSE_FUNCTION=hid.mouse
 POINTER_FUNCTION=hid.pointer
+POWER_FUNCTION=hid.power
 INCLUDE_RELATIVE_MOUSE=${AGENT_IP_KVM_INCLUDE_RELATIVE_MOUSE:-1}
 INCLUDE_ABSOLUTE_POINTER=${AGENT_IP_KVM_INCLUDE_ABSOLUTE_POINTER:-1}
 
@@ -55,10 +56,11 @@ restore_os_descriptor() {
 }
 
 remove_project_functions() {
-    rm -f "$CONFIG/$KEYBOARD_FUNCTION" "$CONFIG/$MOUSE_FUNCTION" "$CONFIG/$POINTER_FUNCTION"
+    rm -f "$CONFIG/$KEYBOARD_FUNCTION" "$CONFIG/$MOUSE_FUNCTION" "$CONFIG/$POINTER_FUNCTION" "$CONFIG/$POWER_FUNCTION"
     rmdir "$GADGET/functions/$KEYBOARD_FUNCTION" 2>/dev/null || true
     rmdir "$GADGET/functions/$MOUSE_FUNCTION" 2>/dev/null || true
     rmdir "$GADGET/functions/$POINTER_FUNCTION" 2>/dev/null || true
+    rmdir "$GADGET/functions/$POWER_FUNCTION" 2>/dev/null || true
 }
 
 apply_hid() {
@@ -67,12 +69,14 @@ apply_hid() {
     [ "$INCLUDE_RELATIVE_MOUSE" = 0 ] || [ "$INCLUDE_RELATIVE_MOUSE" = 1 ] || fail "relative mouse setting must be 0 or 1"
     [ "$INCLUDE_ABSOLUTE_POINTER" = 0 ] || [ "$INCLUDE_ABSOLUTE_POINTER" = 1 ] || fail "absolute pointer setting must be 0 or 1"
     [ -r "$SCRIPT_DIR/keyboard-report-desc.bin" ] || fail "keyboard descriptor is missing"
+    [ -r "$SCRIPT_DIR/system-control-report-desc.bin" ] || fail "system control descriptor is missing"
     [ "$INCLUDE_RELATIVE_MOUSE" -eq 0 ] || [ -r "$SCRIPT_DIR/mouse-report-desc.bin" ] || fail "mouse descriptor is missing"
     [ "$INCLUDE_ABSOLUTE_POINTER" -eq 0 ] || [ -r "$SCRIPT_DIR/pointer-report-desc.bin" ] || fail "pointer descriptor is missing"
 
     CREATE_KEYBOARD=1
     CREATE_MOUSE=$INCLUDE_RELATIVE_MOUSE
     CREATE_POINTER=$INCLUDE_ABSOLUTE_POINTER
+    CREATE_POWER=1
     RECREATE_POINTER=0
     REMOVE_MOUSE_LINK=0
     if [ -e "$GADGET/functions/$KEYBOARD_FUNCTION" ] || [ -e "$CONFIG/$KEYBOARD_FUNCTION" ]; then
@@ -87,6 +91,10 @@ apply_hid() {
         [ -d "$GADGET/functions/$POINTER_FUNCTION" ] && [ -L "$CONFIG/$POINTER_FUNCTION" ] || fail "$POINTER_FUNCTION is partial"
         CREATE_POINTER=0
         RECREATE_POINTER=1
+    fi
+    if [ -e "$GADGET/functions/$POWER_FUNCTION" ] || [ -e "$CONFIG/$POWER_FUNCTION" ]; then
+        [ -d "$GADGET/functions/$POWER_FUNCTION" ] && [ -L "$CONFIG/$POWER_FUNCTION" ] || fail "$POWER_FUNCTION is partial"
+        CREATE_POWER=0
     fi
     if [ "$INCLUDE_RELATIVE_MOUSE" -eq 0 ] && [ -e "$GADGET/functions/$MOUSE_FUNCTION" ]; then
         REMOVE_MOUSE_LINK=1
@@ -117,11 +125,18 @@ apply_hid() {
             rm -f "$CONFIG/$KEYBOARD_FUNCTION"
             rmdir "$GADGET/functions/$KEYBOARD_FUNCTION" 2>/dev/null || true
         fi
+        if [ "$CREATE_POWER" -eq 1 ]; then
+            rm -f "$CONFIG/$POWER_FUNCTION"
+            rmdir "$GADGET/functions/$POWER_FUNCTION" 2>/dev/null || true
+        fi
         if [ "$REMOVE_MOUSE_LINK" -eq 1 ] && [ ! -L "$CONFIG/$MOUSE_FUNCTION" ]; then
             (cd "$GADGET" && ln -s "functions/$MOUSE_FUNCTION" "configs/$CONFIGURATION") || true
         fi
         if [ "$CREATE_KEYBOARD" -eq 0 ] && [ ! -L "$CONFIG/$KEYBOARD_FUNCTION" ]; then
             (cd "$GADGET" && ln -s "functions/$KEYBOARD_FUNCTION" "configs/$CONFIGURATION") || true
+        fi
+        if [ "$CREATE_POWER" -eq 0 ] && [ ! -L "$CONFIG/$POWER_FUNCTION" ]; then
+            (cd "$GADGET" && ln -s "functions/$POWER_FUNCTION" "configs/$CONFIGURATION") || true
         fi
         if [ "$INCLUDE_ABSOLUTE_POINTER" -eq 1 ] && [ "$CREATE_POINTER" -eq 0 ] && [ ! -L "$CONFIG/$POINTER_FUNCTION" ]; then
             if [ ! -d "$GADGET/functions/$POINTER_FUNCTION" ]; then
@@ -145,7 +160,7 @@ apply_hid() {
     if [ "$OS_DESC_LINKED" -eq 1 ]; then
         rm "$OS_DESC_LINK"
     fi
-    rm -f "$CONFIG/$KEYBOARD_FUNCTION" "$CONFIG/$MOUSE_FUNCTION" "$CONFIG/$POINTER_FUNCTION"
+    rm -f "$CONFIG/$KEYBOARD_FUNCTION" "$CONFIG/$MOUSE_FUNCTION" "$CONFIG/$POINTER_FUNCTION" "$CONFIG/$POWER_FUNCTION"
     if [ "$RECREATE_POINTER" -eq 1 ]; then
         rmdir "$GADGET/functions/$POINTER_FUNCTION"
     fi
@@ -160,6 +175,15 @@ apply_hid() {
         printf '8' > "$GADGET/functions/$KEYBOARD_FUNCTION/report_length"
         cat "$SCRIPT_DIR/keyboard-report-desc.bin" > "$GADGET/functions/$KEYBOARD_FUNCTION/report_desc"
     fi
+    if [ "$CREATE_POWER" -eq 1 ]; then
+        mkdir "$GADGET/functions/$POWER_FUNCTION"
+        printf '0' > "$GADGET/functions/$POWER_FUNCTION/protocol"
+        printf '0' > "$GADGET/functions/$POWER_FUNCTION/subclass"
+        printf '1' > "$GADGET/functions/$POWER_FUNCTION/report_length"
+        cat "$SCRIPT_DIR/system-control-report-desc.bin" > "$GADGET/functions/$POWER_FUNCTION/report_desc"
+    fi
+    [ ! -e "$GADGET/functions/$POWER_FUNCTION/no_out_endpoint" ] || \
+        printf '1' > "$GADGET/functions/$POWER_FUNCTION/no_out_endpoint"
     [ ! -e "$GADGET/functions/$KEYBOARD_FUNCTION/no_out_endpoint" ] || \
         printf '1' > "$GADGET/functions/$KEYBOARD_FUNCTION/no_out_endpoint"
 
@@ -193,6 +217,7 @@ apply_hid() {
     if [ "$INCLUDE_ABSOLUTE_POINTER" -eq 1 ]; then
         (cd "$GADGET" && ln -s "functions/$POINTER_FUNCTION" "configs/$CONFIGURATION")
     fi
+    (cd "$GADGET" && ln -s "functions/$POWER_FUNCTION" "configs/$CONFIGURATION")
     restore_os_descriptor
     printf '%s' "$ACTIVE_UDC" > "$GADGET/UDC"
 
