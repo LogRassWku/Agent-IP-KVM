@@ -8,6 +8,14 @@
 - 镜像只显示 `Agent IP KVM USB Boot OK` 并等待按键返回，不读取或写入目标硬盘；标准启动路径为 `EFI/BOOT/BOOTX64.EFI`。
 - 已在 WSL/Ubuntu 环境完成构建和 FAT32 镜像结构验证；尚未写入开发板现有 Mass Storage，也未执行真实 USB 重绑。
 
+## 2026-09-06：USB HID 唤醒测试未通过
+
+- 为“开机”入口增加独立的 HID System Control 接口（`hid.power`），使用 USB HID 的 System Wake Up 报告；它与键盘按键和虚拟 U 盘启动是不同链路。
+- RDK X5 服务端状态能够发现该接口，开发板上存在 `/dev/hidg1`，网页按钮也能向 `/api/power` 发起一次唤醒请求。
+- 在当前 Lenovo 83DF／Y9000P 2024 被控笔记本连接状态下，实际发送报告返回 `Resource temporarily unavailable (EAGAIN)`，没有形成可验证的唤醒闭环；因此该功能不能标记为已验收。
+- 失败更可能与目标主机尚未重新枚举新增 HID 接口、Windows／固件没有轮询 System Control 端点，或 USB 唤醒策略未开启有关。后续测试需要在服务启动后重新插拔 USB，并先以睡眠／待机状态验证。
+- 该测试不代表虚拟 U 盘启动失败；“USB Device”启动项验证的是存储启动链路。完全关机后的通电能力仍取决于笔记本固件是否保持 USB 供电并支持 USB 唤醒，不能由本项目软件单独保证。
+
 ## 2026-09-06：BIOS 视频输出与系统安装路径验证
 
 - 在 Lenovo 83DF 笔记本上确认 Windows 桌面可以由 UGREEN 25854 采集；目标重启并进入 BIOS 后，采集卡在 1920×1080@60 和 1280×720@60 均显示 `No Signal`。
