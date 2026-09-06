@@ -52,6 +52,11 @@ let selectedAgentModel = "qwen2.5-1.5b";
 let modelSetupPollActive = false;
 const pendingSessionSync = new Map();
 const activeAgentJobRequests = new Set();
+const legacyAgentProgress = new Set([
+  "正在分析并准备安全操作…",
+  "正在分析环境并规划操作…",
+  "正在识别屏幕并准备安全操作…",
+]);
 
 const modelSetupStatusNames = {
   awaiting_start: "等待启动", starting: "正在启动", downloading_runtime: "下载运行环境",
@@ -390,6 +395,23 @@ function queueSessionDelete(sessionId) {
     .catch(() => { /* The persisted tombstone retries this deletion during synchronization. */ });
 }
 
+function retireLegacyAgentProgress() {
+  let changed = false;
+  for (const session of agentSessions) {
+    let sessionChanged = false;
+    for (const message of session.messages) {
+      if (message?.role !== "assistant" || message.remoteRequestId
+          || !legacyAgentProgress.has(String(message.content ?? "").trim())) continue;
+      message.content = "上一次 Agent 请求的网页连接已中断，请重新发送。";
+      message.transient = false;
+      sessionChanged = true;
+      changed = true;
+    }
+    if (sessionChanged) session.updatedAt = Date.now();
+  }
+  return changed;
+}
+
 async function syncAgentSessionsFromBoard() {
   try {
     const result = await fetchJson("/api/agent/sessions");
@@ -416,7 +438,8 @@ async function syncAgentSessionsFromBoard() {
       queueSessionSync(session);
     }
     if (!agentSessions.some((session) => session.id === activeAgentSessionId)) activeAgentSessionId = agentSessions[0].id;
-    saveAgentSessions(false); renderAgentSessions(); renderAgentConversation(); resumePendingAgentJobs();
+    const retiredLegacyProgress = retireLegacyAgentProgress();
+    saveAgentSessions(retiredLegacyProgress); renderAgentSessions(); renderAgentConversation(); resumePendingAgentJobs();
   } catch (_) { /* The browser cache remains usable during a board reconnect. */ }
 }
 
@@ -440,6 +463,7 @@ function loadAgentSessions() {
   } catch (_) { agentSessions = []; }
   if (agentSessions.length === 0) agentSessions.push(makeAgentSession());
   if (!agentSessions.some((session) => session.id === activeAgentSessionId)) activeAgentSessionId = agentSessions[0].id;
+  retireLegacyAgentProgress();
   saveAgentSessions();
 }
 
