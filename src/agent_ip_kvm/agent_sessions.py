@@ -79,7 +79,10 @@ class AgentSessionStore:
             # Conversation metadata (plans and setup progress) is intentionally
             # retained, but unknown top-level values are ignored.
             item: dict[str, Any] = {"role": message["role"], "content": content}
-            for key in ("id", "createdAt", "plan", "modelSetup", "remoteModelSetup", "remoteModel"):
+            for key in (
+                "id", "createdAt", "plan", "modelSetup", "remoteModelSetup", "remoteModel",
+                "agentJobId", "remoteRequestId", "transient",
+            ):
                 if key in message:
                     item[key] = message[key]
             clean_messages.append(item)

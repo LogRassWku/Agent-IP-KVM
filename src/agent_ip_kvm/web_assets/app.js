@@ -51,6 +51,7 @@ let activeAgentSessionId = "";
 let selectedAgentModel = "qwen2.5-1.5b";
 let modelSetupPollActive = false;
 const pendingSessionSync = new Map();
+const activeAgentJobRequests = new Set();
 
 const modelSetupStatusNames = {
   awaiting_start: "等待启动", starting: "正在启动", downloading_runtime: "下载运行环境",
@@ -415,7 +416,7 @@ async function syncAgentSessionsFromBoard() {
       queueSessionSync(session);
     }
     if (!agentSessions.some((session) => session.id === activeAgentSessionId)) activeAgentSessionId = agentSessions[0].id;
-    saveAgentSessions(false); renderAgentSessions(); renderAgentConversation();
+    saveAgentSessions(false); renderAgentSessions(); renderAgentConversation(); resumePendingAgentJobs();
   } catch (_) { /* The browser cache remains usable during a board reconnect. */ }
 }
 
@@ -745,6 +746,133 @@ function resizeAgentInput() {
   elements.agentInput.style.height = `${Math.min(130, elements.agentInput.scrollHeight)}px`;
 }
 
+function sleep(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function remoteMessagesBefore(session, progressMessage) {
+  const end = session.messages.indexOf(progressMessage);
+  const messages = end >= 0 ? session.messages.slice(0, end) : session.messages;
+  return messages
+    .filter((item) => (item.role === "user" || item.role === "assistant")
+      && !item.modelSetup && !item.remoteModelSetup && !item.transient)
+    .slice(-20)
+    .map((item) => ({ role: item.role, content: String(item.content ?? "") }));
+}
+
+function setAgentJobProgress(session, message, content, jobId = message.agentJobId) {
+  if (!session.messages.includes(message)) return;
+  const changed = message.content !== content || message.agentJobId !== jobId;
+  message.content = content;
+  message.agentJobId = jobId || "";
+  if (!changed) return;
+  session.updatedAt = Date.now();
+  saveAgentSessions();
+  if (session.id === activeAgentSessionId) renderAgentConversation();
+}
+
+async function createRemoteAgentJob(messages, requestId) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return (await postJson("/api/agent/chat/jobs", { messages, request_id: requestId }, { timeoutMs: 12000 })).job;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await sleep(1000 * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
+async function waitForRemoteAgentJob(initialJob, session, progressMessage) {
+  let job = initialJob;
+  const startedAt = Date.now();
+  let failedPolls = 0;
+  while (Date.now() - startedAt < 140000) {
+    if (job?.status === "completed") return job.result;
+    if (job?.status === "failed") throw new Error(job.error || "Agent 后台任务失败");
+    const elapsed = Date.now() - startedAt;
+    const stage = failedPolls > 0
+      ? "网络短暂中断，正在重新获取后台结果…"
+      : elapsed >= 60000
+        ? "远程模型仍在处理，完成后会自动取回结果…"
+        : elapsed >= 20000
+          ? "正在识别屏幕并准备安全操作…"
+          : "正在分析环境并规划操作…";
+    setAgentJobProgress(session, progressMessage, stage, job?.job_id);
+    await sleep(1500);
+    try {
+      job = (await fetchJson(`/api/agent/chat/jobs/${encodeURIComponent(job.job_id)}`, { timeoutMs: 8000 })).job;
+      failedPolls = 0;
+    } catch (_) {
+      failedPolls += 1;
+    }
+  }
+  throw new Error("Agent 后台任务超过 140 秒仍未返回，请重试");
+}
+
+async function runRemoteAgentJob(session, progressMessage) {
+  const requestId = progressMessage.remoteRequestId;
+  if (activeAgentJobRequests.has(requestId)) return null;
+  activeAgentJobRequests.add(requestId);
+  try {
+    const messages = remoteMessagesBefore(session, progressMessage);
+    setAgentJobProgress(session, progressMessage, "正在连接开发板…");
+    let job;
+    if (progressMessage.agentJobId) {
+      try {
+        job = (await fetchJson(`/api/agent/chat/jobs/${encodeURIComponent(progressMessage.agentJobId)}`, { timeoutMs: 8000 })).job;
+      } catch (_) { /* The service may have restarted; the request ID makes recreation idempotent. */ }
+    }
+    if (!job) job = await createRemoteAgentJob(messages, requestId);
+    setAgentJobProgress(session, progressMessage, "正在分析环境并规划操作…", job.job_id);
+    return await waitForRemoteAgentJob(job, session, progressMessage);
+  } finally {
+    activeAgentJobRequests.delete(requestId);
+  }
+}
+
+function applyRemoteAgentResult(session, progressMessage, response) {
+  const jobId = progressMessage.agentJobId;
+  session.messages = session.messages.filter((item) => item !== progressMessage && !(jobId && item.agentJobId === jobId));
+  if (String(response?.response?.content ?? "").trim()) {
+    session.messages.push({
+      role: "assistant", content: response.response.content, createdAt: Date.now(),
+      remoteModel: response.response.model, agentJobId: jobId,
+    });
+  }
+  for (const plan of response?.plans ?? []) {
+    session.messages.push({
+      role: "assistant", content: plan.summary, plan, createdAt: Date.now(),
+      remoteModel: response.response.model, agentJobId: jobId,
+    });
+  }
+}
+
+async function resumeRemoteAgentJob(session, progressMessage) {
+  if (!progressMessage?.remoteRequestId || activeAgentJobRequests.has(progressMessage.remoteRequestId)) return;
+  try {
+    const response = await runRemoteAgentJob(session, progressMessage);
+    if (response) applyRemoteAgentResult(session, progressMessage, response);
+  } catch (error) {
+    session.messages = session.messages.filter((item) => item !== progressMessage);
+    session.messages.push({ role: "assistant", content: `无法处理：${error.message}`, createdAt: Date.now() });
+  } finally {
+    session.updatedAt = Date.now();
+    saveAgentSessions();
+    renderAgentSessions();
+    if (session.id === activeAgentSessionId) renderAgentConversation();
+  }
+}
+
+function resumePendingAgentJobs() {
+  for (const session of agentSessions) {
+    for (const message of session.messages) {
+      if (message?.transient && message.remoteRequestId) resumeRemoteAgentJob(session, message);
+    }
+  }
+}
+
 async function submitAgentPrompt(prompt) {
   const value = String(prompt ?? "").trim();
   if (!value) return;
@@ -761,21 +889,15 @@ async function submitAgentPrompt(prompt) {
   let progressMessage = null;
   try {
     if (selectedAgentModel === "remote-api") {
-      const messages = session.messages
-        .filter((item) => (item.role === "user" || item.role === "assistant") && !item.modelSetup && !item.remoteModelSetup)
-        .slice(-20).map((item) => ({ role: item.role, content: String(item.content ?? "") }));
-      progressMessage = { role: "assistant", content: "正在分析并准备安全操作…", createdAt: Date.now(), transient: true };
+      progressMessage = {
+        role: "assistant", content: "正在连接开发板…", createdAt: Date.now(), transient: true,
+        remoteRequestId: newSessionId(), agentJobId: "",
+      };
       session.messages.push(progressMessage);
-      renderAgentConversation();
-      const response = await postJson("/api/agent/chat", { messages }, { timeoutMs: 120000 });
-      session.messages = session.messages.filter((item) => item !== progressMessage);
+      saveAgentSessions(); renderAgentConversation();
+      const response = await runRemoteAgentJob(session, progressMessage);
+      applyRemoteAgentResult(session, progressMessage, response);
       progressMessage = null;
-      if (String(response.response.content ?? "").trim()) {
-        session.messages.push({ role: "assistant", content: response.response.content, createdAt: Date.now(), remoteModel: response.response.model });
-      }
-      for (const plan of response.plans ?? []) {
-        session.messages.push({ role: "assistant", content: plan.summary, plan, createdAt: Date.now(), remoteModel: response.response.model });
-      }
     } else {
       const response = await postJson("/api/agent/plans", { objective: value, model: selectedAgentModel });
       const plan = response.plan;
@@ -1004,8 +1126,19 @@ async function postJson(path, payload, options = {}) {
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
 }
 
-async function fetchJson(path) {
-  const response = await fetch(path, { cache: "no-store" });
+async function fetchJson(path, options = {}) {
+  const timeoutMs = Number(options.timeoutMs ?? 15000);
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(path, { cache: "no-store", signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`请求超过 ${Math.round(timeoutMs / 1000)} 秒，已停止等待`);
+    throw new Error("无法连接开发板服务，请检查网络后重试");
+  } finally {
+    window.clearTimeout(timer);
+  }
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
 }
 
@@ -1220,5 +1353,5 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-loadAgentSessions(); loadAgentModel(); renderAgentSessions(); renderAgentConversation(); pollModelSetupTasks(); syncAgentSessionsFromBoard();
+loadAgentSessions(); loadAgentModel(); renderAgentSessions(); renderAgentConversation(); pollModelSetupTasks(); resumePendingAgentJobs(); syncAgentSessionsFromBoard();
 setZoom(100); connectStream(); refreshStatus(); setInterval(refreshStatus, 5000); setInterval(syncAgentSessionsFromBoard, 5000);

@@ -30,6 +30,7 @@ from .agent_control import (
     PeerAuthenticationError,
     PeerTokenAuthenticator,
 )
+from .agent_chat_jobs import AgentChatJobError, AgentChatJobStore
 from .agent_sessions import AgentSessionError, AgentSessionStore
 from .host_info import HostInfoStore
 from .model_setup import ModelSetupError, ModelSetupStore
@@ -1014,10 +1015,10 @@ def run_remote_agent_chat(
     ]
     plans: list[dict[str, object]] = []
     tool_events: list[dict[str, object]] = []
-    for _ in range(5):
+    for _ in range(3):
         response = remote_model.chat(
             transcript,
-            timeout=30,
+            timeout=25,
             tools=REMOTE_AGENT_TOOLS,
             tool_choice="auto",
         )
@@ -1078,7 +1079,7 @@ def run_remote_agent_chat(
                             vision = remote_model.analyze_image(
                                 jpeg,
                                 purpose.strip(),
-                                timeout=45,
+                                timeout=35,
                             )
                             result = {"ok": True, "frame": frame, "vision": vision}
                             analysis = vision.get("analysis", {})
@@ -1164,7 +1165,7 @@ def run_remote_agent_chat(
                 "plans": plans,
                 "tool_events": tool_events,
             }
-    raise RemoteModelError("remote Agent exceeded the maximum of five tool rounds")
+    raise RemoteModelError("remote Agent exceeded the maximum of three tool rounds")
 
 
 def build_remote_agent_system_prompt(
@@ -1242,11 +1243,42 @@ def create_handler(
     model_setup = model_setup_store or ModelSetupStore(config.model_setup_path)
     remote_model = remote_model_store or RemoteModelStore(config.remote_model_path)
     agent_sessions = agent_session_store or AgentSessionStore(config.agent_sessions_path)
+    agent_chat_jobs = AgentChatJobStore()
     agent = agent_coordinator or AgentCoordinator(
         hid_controller=hid,
         observe=lambda: observe_stream(stream, config),
         audit_log=audit,
     )
+
+    def execute_remote_agent_chat(payload: dict[str, object]) -> dict[str, object]:
+        messages = payload.get("messages")
+        if not isinstance(messages, list):
+            raise RemoteModelError("messages must be an array")
+        conversation: list[dict[str, object]] = []
+        for message in messages:
+            if not isinstance(message, dict) or message.get("role") not in {"user", "assistant"}:
+                raise RemoteModelError("remote chat only accepts user and assistant messages")
+            content = message.get("content")
+            if not isinstance(content, str) or not content.strip():
+                raise RemoteModelError("remote chat message content is invalid")
+            conversation.append({"role": message["role"], "content": content})
+        system = build_remote_agent_system_prompt(
+            config,
+            host_info.status(),
+            stream.status(),
+            hid.status(),
+        )
+        return run_remote_agent_chat(
+            remote_model,
+            conversation,
+            system,
+            host_info_getter=host_info.status,
+            stream_status_getter=stream.status,
+            screen_capture_getter=lambda: capture_stream(stream, config),
+            hid_status_getter=hid.status,
+            agent=agent,
+            audit=audit,
+        )
     assets = {
         "/": ("index.html", "text/html; charset=utf-8"),
         "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -1274,6 +1306,15 @@ def create_handler(
 
         def do_GET(self) -> None:
             path = urlsplit(self.path).path
+            if path.startswith("/api/agent/chat/jobs/"):
+                job_id = path.rsplit("/", 1)[-1]
+                try:
+                    job = agent_chat_jobs.get(job_id)
+                except AgentChatJobError as exc:
+                    self._send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+                    return
+                self._send_json({"job": job})
+                return
             if path == "/api/status":
                 payload = status_provider(config)
                 payload["stream"] = stream.status()
@@ -1369,6 +1410,7 @@ def create_handler(
                 "/api/remote-model/config",
                 "/api/remote-model/test",
                 "/api/agent/chat",
+                "/api/agent/chat/jobs",
                 "/api/agent/sessions",
             }:
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -1396,7 +1438,7 @@ def create_handler(
                 length = 0
             maximum_length = (
                 65536
-                if path in {"/api/host-info", "/api/pc-agent/suggestions", "/api/model-setup/progress", "/api/agent/chat", "/api/agent/sessions"}
+                if path in {"/api/host-info", "/api/pc-agent/suggestions", "/api/model-setup/progress", "/api/agent/chat", "/api/agent/chat/jobs", "/api/agent/sessions"}
                 else 32768
                 if path.startswith("/api/agent/")
                 else 4096
@@ -1504,34 +1546,15 @@ def create_handler(
                         }
                     }
                 elif path == "/api/agent/chat":
-                    messages = payload.get("messages")
-                    if not isinstance(messages, list):
-                        raise RemoteModelError("messages must be an array")
-                    conversation: list[dict[str, object]] = []
-                    for message in messages:
-                        if not isinstance(message, dict) or message.get("role") not in {"user", "assistant"}:
-                            raise RemoteModelError("remote chat only accepts user and assistant messages")
-                        content = message.get("content")
-                        if not isinstance(content, str) or not content.strip():
-                            raise RemoteModelError("remote chat message content is invalid")
-                        conversation.append({"role": message["role"], "content": content})
-                    system = build_remote_agent_system_prompt(
-                        config,
-                        host_info.status(),
-                        stream.status(),
-                        hid.status(),
+                    result = execute_remote_agent_chat(payload)
+                elif path == "/api/agent/chat/jobs":
+                    request_id = payload.get("request_id")
+                    job = agent_chat_jobs.create(
+                        request_id if isinstance(request_id, str) else "",
+                        lambda request_payload=dict(payload): execute_remote_agent_chat(request_payload),
                     )
-                    result = run_remote_agent_chat(
-                        remote_model,
-                        conversation,
-                        system,
-                        host_info_getter=host_info.status,
-                        stream_status_getter=stream.status,
-                        screen_capture_getter=lambda: capture_stream(stream, config),
-                        hid_status_getter=hid.status,
-                        agent=agent,
-                        audit=audit,
-                    )
+                    audit.record("remote_agent_job_created", job_id=job["job_id"], request_id=job["request_id"])
+                    result = {"job": job}
                 elif path == "/api/agent/sessions":
                     saved = agent_sessions.upsert(payload.get("session"))
                     result = {"session": saved}
@@ -1552,6 +1575,7 @@ def create_handler(
                 ModelSetupError,
                 RemoteModelError,
                 AgentSessionError,
+                AgentChatJobError,
                 OSError,
                 VideoSourceError,
                 HidError,

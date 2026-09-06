@@ -1,6 +1,7 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -181,6 +182,25 @@ class AgentApiTests(unittest.TestCase):
         self.assertIn("必须调用 capture_screen", prompt)
         self.assertIn("调用 propose_hid_actions", prompt)
         self.assertIn("等待网页审批", prompt)
+
+    def test_remote_agent_job_is_idempotent_and_pollable(self):
+        self.remote_model.responses = [text_response("后台完成")]
+        payload = {
+            "request_id": "browser-request-1",
+            "messages": [{"role": "user", "content": "检查状态"}],
+        }
+        _, created = self.post("/api/agent/chat/jobs", payload)
+        _, repeated = self.post("/api/agent/chat/jobs", payload)
+        self.assertEqual(created["job"]["job_id"], repeated["job"]["job_id"])
+        job_id = created["job"]["job_id"]
+        for _ in range(100):
+            with urlopen(self.base_url + f"/api/agent/chat/jobs/{job_id}", timeout=2) as response:
+                job = json.load(response)["job"]
+            if job["status"] == "completed":
+                break
+            time.sleep(0.01)
+        self.assertEqual(job["result"]["response"]["content"], "后台完成")
+        self.assertEqual(len(self.remote_model.requests), 1)
 
     def test_remote_agent_can_capture_screen_through_a_read_only_tool(self):
         self.remote_model.responses = [
