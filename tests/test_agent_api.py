@@ -43,6 +43,7 @@ class ScriptedRemoteModel:
     def __init__(self):
         self.responses = []
         self.requests = []
+        self.vision_requests = []
 
     def public(self):
         return {"provider": "DeepSeek", "model": "deepseek-v4-flash", "configured": True}
@@ -52,6 +53,21 @@ class ScriptedRemoteModel:
         if not self.responses:
             raise AssertionError("unexpected remote model call")
         return self.responses.pop(0)
+
+    def analyze_image(self, jpeg, purpose, *, timeout=90):
+        self.vision_requests.append({"jpeg": jpeg, "purpose": purpose})
+        return {
+            "model": "deepseek-v4-flash-vision-exp",
+            "analysis": {
+                "screen_type": "windows_desktop",
+                "summary": "测试桌面",
+                "visible_text": ["Start"],
+                "interactive_elements": [],
+                "confidence": 0.98,
+                "safety_notes": [],
+            },
+            "usage": None,
+        }
 
 
 def tool_call_response(name, arguments, call_id="call-1"):
@@ -188,7 +204,10 @@ class AgentApiTests(unittest.TestCase):
         )
         tool_message = self.remote_model.requests[1]["messages"][-1]
         self.assertEqual(tool_message["role"], "tool")
-        self.assertIn("test_pattern", tool_message["content"])
+        self.assertIn("windows_desktop", tool_message["content"])
+        self.assertNotIn("test_pattern", tool_message["content"])
+        self.assertEqual(self.remote_model.vision_requests[0]["jpeg"], SnapshotStream.jpeg)
+        self.assertEqual(self.remote_model.vision_requests[0]["purpose"], "查看当前界面")
 
     def test_remote_agent_hid_tool_creates_approval_card_before_input(self):
         self.remote_model.responses = [

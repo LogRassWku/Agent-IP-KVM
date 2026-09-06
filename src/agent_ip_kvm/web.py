@@ -863,12 +863,12 @@ class VideoStreamController:
             self._condition.notify_all()
 
 
-def observe_stream(stream: StreamProvider, config: WebConfig) -> dict[str, object]:
-    """Capture one frame and attach a conservative, pluggable state result."""
+def capture_stream(stream: StreamProvider, config: WebConfig) -> tuple[bytes, dict[str, object]]:
+    """Capture one frame and return its bytes plus conservative local metadata."""
     snapshot = getattr(stream, "snapshot", None)
     if not callable(snapshot):
         raise VideoSourceError("video source does not support snapshots")
-    _, metadata = snapshot()
+    jpeg, metadata = snapshot()
     if config.source_kind == "synthetic":
         recognition = {
             "state": "test_pattern",
@@ -881,7 +881,13 @@ def observe_stream(stream: StreamProvider, config: WebConfig) -> dict[str, objec
             "confidence": 0.0,
             "evidence": ["frame captured; semantic recognizer is not configured"],
         }
-    return {"frame": metadata, "recognition": recognition}
+    return jpeg, {"frame": metadata, "recognition": recognition}
+
+
+def observe_stream(stream: StreamProvider, config: WebConfig) -> dict[str, object]:
+    """Capture one frame and attach a conservative, pluggable state result."""
+    _, observation = capture_stream(stream, config)
+    return observation
 
 
 REMOTE_AGENT_TOOLS: list[dict[str, object]] = [
@@ -911,8 +917,8 @@ REMOTE_AGENT_TOOLS: list[dict[str, object]] = [
         "function": {
             "name": "capture_screen",
             "description": (
-                "请求开发板从采集卡按需取得当前屏幕的一帧，并返回帧元数据和现有识别器的结果。"
-                "用户询问当前屏幕、界面状态或动作结果时使用；识别结果为 unknown 时必须如实说明。"
+                "请求开发板从采集卡按需取得当前屏幕的一帧，交给独立视觉模型理解，并返回结构化屏幕内容。"
+                "用户询问当前屏幕、界面状态或动作结果时使用；低置信度或失败时必须如实说明。"
             ),
             "parameters": {
                 "type": "object",
@@ -996,6 +1002,7 @@ def run_remote_agent_chat(
     *,
     host_info_getter: Callable[[], dict[str, object]],
     stream_status_getter: Callable[[], dict[str, object]],
+    screen_capture_getter: Callable[[], tuple[bytes, dict[str, object]]],
     hid_status_getter: Callable[[], dict[str, object]],
     agent: AgentCoordinator,
     audit: AuditLog,
@@ -1060,15 +1067,29 @@ def run_remote_agent_chat(
                         purpose = arguments.get("purpose", "读取当前屏幕")
                         if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > 200:
                             raise ValueError("capture_screen purpose must be a short string")
-                        created = agent.create_plan(
-                            {
-                                "objective": f"只读截图：{purpose.strip()}",
-                                "model": "remote-api",
-                                "actions": [{"type": "observe"}],
+                        jpeg, observation = screen_capture_getter()
+                        frame = observation.get("frame", {})
+                        try:
+                            vision = remote_model.analyze_image(jpeg, purpose.strip())
+                            result = {"ok": True, "frame": frame, "vision": vision}
+                            analysis = vision.get("analysis", {})
+                            audit.record(
+                                "remote_agent_screen_analyzed",
+                                frame_sha256=frame.get("sha256") if isinstance(frame, dict) else None,
+                                vision_model=vision.get("model"),
+                                confidence=analysis.get("confidence") if isinstance(analysis, dict) else None,
+                            )
+                        except RemoteModelError as exc:
+                            result = {
+                                "ok": False,
+                                "observation": observation,
+                                "vision": {"status": "error", "error": str(exc)},
                             }
-                        )
-                        executed = agent.execute({"plan_id": created["plan_id"]})
-                        result = {"ok": True, "observation": executed["result"][0]["result"]}
+                            audit.record(
+                                "remote_agent_screen_analysis_failed",
+                                frame_sha256=frame.get("sha256") if isinstance(frame, dict) else None,
+                                error=str(exc)[:300],
+                            )
                     elif name == "propose_hid_actions":
                         objective = arguments.get("objective")
                         actions = arguments.get("actions")
@@ -1144,7 +1165,10 @@ def build_remote_agent_system_prompt(
         f"被控主机清单快照（controlled-host.json）：{host_json}\n\n"
         "# 工具使用规则\n"
         "- 用户问当前屏幕显示什么、当前处于什么界面或动作是否成功时，必须调用 capture_screen；"
-        "不能从聊天记录、视频连接状态或旧截图猜测。若识别结果为 unknown，明确说明已经取得画面但当前文字模型不能理解画面内容。\n"
+        "不能从聊天记录、视频连接状态或旧截图猜测。该工具会把单帧 JPEG 交给独立视觉模型，"
+        "返回 vision.analysis 的结构化描述；以该字段为屏幕语义的唯一依据，不得超出视觉模型直接报告的内容。"
+        "工具中的 frame 只表示截图元数据，不是第二份识别结果。若视觉分析失败、为 unknown 或置信度过低，"
+        "明确说明当前不能可靠理解画面并停止依赖该画面的操作。\n"
         "- 用户问视频、采集卡或 HID 是否连接时，调用 get_kvm_status。连接状态不等于屏幕内容。\n"
         "- 用户问被控电脑的系统和硬件时，调用 get_controlled_host_info。清单没有的字段回答未知。\n"
         "- 用户要求按键、输入文本或操作被控电脑时，调用 propose_hid_actions 创建结构化计划。"
@@ -1476,6 +1500,7 @@ def create_handler(
                         system,
                         host_info_getter=host_info.status,
                         stream_status_getter=stream.status,
+                        screen_capture_getter=lambda: capture_stream(stream, config),
                         hid_status_getter=hid.status,
                         agent=agent,
                         audit=audit,

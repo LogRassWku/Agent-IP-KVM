@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -36,7 +37,16 @@ REMOTE_MODEL_CATALOG = (
     },
 )
 
+VISION_MODEL_CATALOG = (
+    {
+        "id": "deepseek-v4-flash-vision-exp",
+        "name": "DeepSeek V4 Flash Vision Exp",
+        "description": "按需理解 KVM 截图；不会持续上传视频",
+    },
+)
+
 _MODEL_IDS = {item["id"] for item in REMOTE_MODEL_CATALOG}
+_VISION_MODEL_IDS = {item["id"] for item in VISION_MODEL_CATALOG}
 _KEY_RE = re.compile(r"^[A-Za-z0-9._\-]{20,256}$")
 
 
@@ -69,7 +79,9 @@ class RemoteModelStore:
             "provider": "DeepSeek",
             "base_url": config.get("base_url", "https://api.deepseek.com"),
             "model": config.get("model", "deepseek-v4-flash"),
+            "vision_model": config.get("vision_model", "deepseek-v4-flash-vision-exp"),
             "models": list(REMOTE_MODEL_CATALOG),
+            "vision_models": list(VISION_MODEL_CATALOG),
             "configured": bool(config.get("api_key")),
             "updated_at": config.get("updated_at"),
         }
@@ -80,6 +92,7 @@ class RemoteModelStore:
     def save(self, payload: dict[str, object]) -> dict[str, object]:
         base_url = payload.get("base_url", "https://api.deepseek.com")
         model = payload.get("model", "deepseek-v4-flash")
+        vision_model = payload.get("vision_model", "deepseek-v4-flash-vision-exp")
         api_key = payload.get("api_key")
         if not isinstance(base_url, str):
             raise RemoteModelError("base_url must be a string")
@@ -88,11 +101,19 @@ class RemoteModelStore:
             raise RemoteModelError("base_url must use HTTPS (or HTTP for a private LAN endpoint)")
         if not isinstance(model, str) or model not in _MODEL_IDS:
             raise RemoteModelError("unsupported remote model")
+        if not isinstance(vision_model, str) or vision_model not in _VISION_MODEL_IDS:
+            raise RemoteModelError("unsupported remote vision model")
         if not isinstance(api_key, str) or not _KEY_RE.fullmatch(api_key.strip()):
             raise RemoteModelError("api_key must be a non-empty provider key")
         now = _utc_now()
         with self._lock:
-            self._config = {"base_url": base_url, "model": model, "api_key": api_key.strip(), "updated_at": now}
+            self._config = {
+                "base_url": base_url,
+                "model": model,
+                "vision_model": vision_model,
+                "api_key": api_key.strip(),
+                "updated_at": now,
+            }
             self._save()
         return self.public()
 
@@ -153,7 +174,6 @@ class RemoteModelStore:
             config = dict(self._config)
         if not config.get("api_key"):
             raise RemoteModelError("remote model is not configured")
-        endpoint = config["base_url"] + "/chat/completions"
         payload: dict[str, object] = {
             "model": config["model"],
             "messages": clean,
@@ -162,25 +182,10 @@ class RemoteModelStore:
         if tools is not None:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        request = urllib.request.Request(
-            endpoint,
-            data=body,
-            method="POST",
-            headers={"Authorization": f"Bearer {config['api_key']}", "Content-Type": "application/json"},
-        )
+        result = self._request(config, payload, timeout=timeout)
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw = response.read(2_000_000)
-        except urllib.error.HTTPError as exc:
-            detail = exc.read(2_000).decode("utf-8", errors="replace")
-            raise RemoteModelError(f"remote API returned HTTP {exc.code}: {detail[:300]}") from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise RemoteModelError(f"remote API connection failed: {exc}") from exc
-        try:
-            result: Any = json.loads(raw.decode("utf-8"))
             response_message = result["choices"][0]["message"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError) as exc:
             raise RemoteModelError("remote API returned an invalid chat response") from exc
         if not isinstance(response_message, dict):
             raise RemoteModelError("remote API returned an invalid assistant message")
@@ -200,6 +205,106 @@ class RemoteModelStore:
             "tool_calls": tool_calls,
             "message": clean_message,
         }
+
+    def analyze_image(
+        self,
+        jpeg: bytes,
+        purpose: str,
+        *,
+        timeout: float = 90.0,
+    ) -> dict[str, object]:
+        """Send one JPEG to the configured vision model and return bounded JSON."""
+        if not isinstance(jpeg, bytes) or not jpeg.startswith(b"\xff\xd8") or len(jpeg) > 8_000_000:
+            raise RemoteModelError("vision input must be a JPEG no larger than 8 MB")
+        if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > 200:
+            raise RemoteModelError("vision purpose must be a short string")
+        with self._lock:
+            config = dict(self._config)
+        if not config.get("api_key"):
+            raise RemoteModelError("remote model is not configured")
+        vision_model = config.get("vision_model", "deepseek-v4-flash-vision-exp")
+        if vision_model not in _VISION_MODEL_IDS:
+            raise RemoteModelError("unsupported remote vision model")
+        encoded = base64.b64encode(jpeg).decode("ascii")
+        prompt = (
+            "你是 Agent IP KVM 的只读屏幕观察器。只描述截图中直接可见的事实，不推断隐藏内容，"
+            "不规划或执行操作。请返回一个 JSON 对象，字段为："
+            "screen_type（windows_desktop、bios_uefi、boot_menu、installer、login、terminal、"
+            "application、no_signal 或 unknown），summary（简洁中文），visible_text（最多30条），"
+            "interactive_elements（最多30项，每项含 label、type、x、y；x/y 为0到1的归一化中心坐标），"
+            "confidence（0到1），safety_notes（数组）。"
+            f"本次观察目的：{purpose.strip()}"
+        )
+        payload: dict[str, object] = {
+            "model": vision_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
+                        },
+                    ],
+                }
+            ],
+            "response_format": {"type": "json_object"},
+            "stream": False,
+        }
+        result = self._request(config, payload, timeout=timeout)
+        try:
+            content = result["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RemoteModelError("vision API returned an invalid response") from exc
+        if not isinstance(content, str) or len(content) > 64_000:
+            raise RemoteModelError("vision API returned invalid content")
+        analysis = self._parse_json_object(content)
+        return {
+            "model": result.get("model", vision_model),
+            "analysis": analysis,
+            "usage": result.get("usage"),
+        }
+
+    @staticmethod
+    def _parse_json_object(content: str) -> dict[str, object]:
+        candidate = content.strip()
+        if candidate.startswith("```"):
+            candidate = re.sub(r"^```(?:json)?\s*", "", candidate, flags=re.IGNORECASE)
+            candidate = re.sub(r"\s*```$", "", candidate)
+        try:
+            value = json.loads(candidate)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RemoteModelError("vision API did not return a JSON object") from exc
+        if not isinstance(value, dict):
+            raise RemoteModelError("vision API did not return a JSON object")
+        return value
+
+    @staticmethod
+    def _request(config: dict[str, str], payload: dict[str, object], *, timeout: float) -> dict[str, Any]:
+        endpoint = config["base_url"] + "/chat/completions"
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            endpoint,
+            data=body,
+            method="POST",
+            headers={"Authorization": f"Bearer {config['api_key']}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read(2_000_000)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(2_000).decode("utf-8", errors="replace")
+            raise RemoteModelError(f"remote API returned HTTP {exc.code}: {detail[:300]}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RemoteModelError(f"remote API connection failed: {exc}") from exc
+        try:
+            result: Any = json.loads(raw.decode("utf-8"))
+        except (ValueError, TypeError) as exc:
+            raise RemoteModelError("remote API returned invalid JSON") from exc
+        if not isinstance(result, dict):
+            raise RemoteModelError("remote API returned invalid JSON")
+        return result
 
     @staticmethod
     def _clean_tool_calls(value: object) -> list[dict[str, object]]:
@@ -252,7 +357,11 @@ class RemoteModelStore:
         try:
             payload: Any = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
-                self._config = {key: str(payload[key]) for key in ("base_url", "model", "api_key", "updated_at") if key in payload}
+                self._config = {
+                    key: str(payload[key])
+                    for key in ("base_url", "model", "vision_model", "api_key", "updated_at")
+                    if key in payload
+                }
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             self._config = {}
 

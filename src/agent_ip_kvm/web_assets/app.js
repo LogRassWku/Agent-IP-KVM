@@ -576,11 +576,19 @@ function renderRemoteModelSetup(message) {
     option.selected = model.id === (setup.model || "deepseek-v4-flash"); modelSelect.append(option);
   }
   modelLabel.append(modelSelect);
+  const visionLabel = document.createElement("label"); visionLabel.textContent = "屏幕视觉";
+  const visionSelect = document.createElement("select"); visionSelect.dataset.remoteField = "vision_model";
+  for (const model of setup.catalog?.vision_models ?? []) {
+    const option = document.createElement("option"); option.value = model.id;
+    option.textContent = model.name; option.title = model.description;
+    option.selected = model.id === (setup.visionModel || "deepseek-v4-flash-vision-exp"); visionSelect.append(option);
+  }
+  visionLabel.append(visionSelect);
   const keyLabel = document.createElement("label"); keyLabel.className = "wide"; keyLabel.textContent = "API 密钥";
   const keyInput = document.createElement("input"); keyInput.type = "password"; keyInput.dataset.remoteField = "api_key";
   keyInput.placeholder = setup.configured ? "已配置，输入新密钥可替换" : "粘贴 DeepSeek API 密钥";
   keyInput.autocomplete = "new-password"; keyLabel.append(keyInput);
-  fields.append(baseLabel, modelLabel, keyLabel); card.append(fields);
+  fields.append(baseLabel, modelLabel, visionLabel, keyLabel); card.append(fields);
   const actions = document.createElement("div"); actions.className = "model-setup-actions";
   const save = document.createElement("button"); save.type = "button"; save.className = "model-setup-start";
   save.dataset.remoteSetupAction = "save"; save.textContent = "保存配置"; actions.append(save);
@@ -794,7 +802,7 @@ async function openRemoteModelSetup() {
   session.messages.push({
     id: newSessionId(), role: "assistant", content: current.configured ? "远程 API 已配置，可以替换密钥或测试连接。" : "请选择 DeepSeek 模型并填写 API 密钥。",
     createdAt: Date.now(), remoteModelSetup: {
-      catalog, baseUrl: current.base_url, model: current.model, configured: current.configured, result: "",
+      catalog, baseUrl: current.base_url, model: current.model, visionModel: current.vision_model, configured: current.configured, result: "",
     },
   });
   agentSessions.push(session); activeAgentSessionId = session.id;
@@ -808,10 +816,11 @@ async function saveRemoteModelSetup(card) {
   const button = card.querySelector("[data-remote-setup-action='save']"); button.disabled = true;
   const baseUrl = card.querySelector("[data-remote-field='base_url']").value.trim();
   const model = card.querySelector("[data-remote-field='model']").value;
+  const visionModel = card.querySelector("[data-remote-field='vision_model']").value;
   const apiKey = card.querySelector("[data-remote-field='api_key']").value.trim();
   try {
-    const saved = await postJson("/api/remote-model/config", { base_url: baseUrl, model, api_key: apiKey });
-    message.remoteModelSetup = { ...message.remoteModelSetup, baseUrl: saved.remote_model.base_url, model: saved.remote_model.model, configured: true, result: "配置已保存。点击“测试连接”确认服务可用。" };
+    const saved = await postJson("/api/remote-model/config", { base_url: baseUrl, model, vision_model: visionModel, api_key: apiKey });
+    message.remoteModelSetup = { ...message.remoteModelSetup, baseUrl: saved.remote_model.base_url, model: saved.remote_model.model, visionModel: saved.remote_model.vision_model, configured: true, result: "配置已保存。文字模型负责规划；视觉模型只在请求截图时读取单帧。" };
     selectAgentModel("remote-api");
   } catch (error) { message.remoteModelSetup.result = `保存失败：${error.message}`; }
   session.updatedAt = Date.now(); saveAgentSessions(); renderAgentSessions(); renderAgentConversation();
