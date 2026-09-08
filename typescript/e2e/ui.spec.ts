@@ -2,6 +2,13 @@ import { test, expect } from "@playwright/test";
 test("device-mode selection uses only advertised MJPEG modes (hardware response fixture)", async ({
   page,
 }) => {
+  // Hold discovery until the menu is open, reproducing the CI race without
+  // relying on runner speed or an arbitrary sleep.
+  let releaseStatus!: () => void;
+  let statusMessage: string | null = null;
+  const statusGate = new Promise<void>((resolve) => {
+    releaseStatus = resolve;
+  });
   await page.route("**/api/status", async (route) => {
     const response = await route.fetch();
     const data = await response.json();
@@ -29,6 +36,8 @@ test("device-mode selection uses only advertised MJPEG modes (hardware response 
         },
       ],
     };
+    await statusGate;
+    data.source.error = statusMessage;
     await route.fulfill({ json: data });
   });
   await page.route("**/api/video-settings", (route) =>
@@ -36,8 +45,17 @@ test("device-mode selection uses only advertised MJPEG modes (hardware response 
   );
   await page.locator("#refresh-button").click();
   await page.locator("#screen-button").click();
+  await expect(page.locator("#resolution-select")).toBeDisabled();
+  releaseStatus();
   await expect(page.locator("#resolution-select")).toHaveValue("1920x1080");
   await page.locator("#resolution-select").selectOption("1280x720");
+  await expect(page.locator("#refresh-rate-select")).toHaveValue("60");
+  // The next status poll must not reset the user's unapplied selection.
+  statusMessage = "unchanged capabilities";
+  await expect(page.locator("#info-error")).toHaveText(statusMessage, {
+    timeout: 10000,
+  });
+  await expect(page.locator("#resolution-select")).toHaveValue("1280x720");
   await expect(page.locator("#refresh-rate-select")).toHaveValue("60");
   const update = page.waitForRequest((r) =>
     r.url().endsWith("/api/video-settings"),

@@ -26,6 +26,7 @@ const elements = {
 };
 
 let videoModes = [];
+let screenModesSignature = "";
 let hidEnabled = false;
 let zoomPercent = 100;
 const activeModifiers = new Set();
@@ -196,11 +197,20 @@ function fillRefreshRates(selectedFps) {
   }
 }
 
-function updateScreenOptions(payload) {
-  const sourceMode = payload.source?.capabilities?.[0];
+function screenModes(payload) {
   const captureDevice = payload.v4l2?.devices?.find((device) =>
     device.device_path === payload.source?.source_id?.replace("v4l2:", "") && device.supports_video_capture);
-  videoModes = (captureDevice?.capabilities ?? []).filter((mode) => mode.pixel_format === "MJPG" || mode.pixel_format === "MJPEG");
+  return (captureDevice?.capabilities ?? []).filter((mode) => mode.pixel_format === "MJPG" || mode.pixel_format === "MJPEG");
+}
+
+function screenSignature(payload) {
+  return JSON.stringify([payload.source?.source_id, screenModes(payload)]);
+}
+
+function updateScreenOptions(payload) {
+  const sourceMode = payload.source?.capabilities?.[0];
+  videoModes = screenModes(payload);
+  screenModesSignature = screenSignature(payload);
   const resolutions = [...new Map(videoModes.map((mode) => [`${mode.width}x${mode.height}`, mode])).values()]
     .sort((a, b) => (b.width * b.height) - (a.width * a.height));
   elements.resolutionSelect.replaceChildren();
@@ -260,7 +270,9 @@ function updateStatus(payload) {
   text("info-resolution", modeLabel(source?.capabilities, "resolution")); text("info-fps", modeLabel(source?.capabilities, "fps"));
   text("info-error", source?.error || "无"); updateDevices(payload.v4l2); updateHidStatus(payload.hid); updateHostInfo(payload.controlled_host);
   updatePowerStatus(payload.power);
-  if (elements.screenMenu.hidden) updateScreenOptions(payload);
+  // Discovery may finish after the user opens the menu. Refresh changed
+  // capabilities then, but preserve an unsaved selection during ordinary polls.
+  if (elements.screenMenu.hidden || screenSignature(payload) !== screenModesSignature) updateScreenOptions(payload);
 }
 
 function updatePowerStatus(power) {

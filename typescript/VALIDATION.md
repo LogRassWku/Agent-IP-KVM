@@ -30,3 +30,9 @@
 - 后端和测试 strict 类型检查通过；UI 保留渐进式类型检查设置，详见 README。
 
 `src/agent_ip_kvm/`、原 Python `tests/` 和原 `scripts/` 未修改。原 HTML、CSS、SVG 原样保留到新目录。原 README 的实机记录仅属于 Python 基线。
+
+## 首轮 CI 失败修复
+
+GitHub Actions 首轮 push 的 Windows/Node 22 和 PR 的 Linux/Node 22 在同一个浏览器断言失败：刷新响应晚于屏幕菜单打开时，分辨率列表没有更新。其余取消的矩阵任务由默认 fail-fast 触发。
+
+使用受控响应门闩在本机稳定复现了相同失败。修复使设备或模式列表变化时更新已打开的菜单，普通状态轮询仍保留用户尚未应用的选择。回归测试同时验证延迟发现和选择不被轮询重置。修复后的本机完整检查为 29 项后端测试和 6 项浏览器测试通过；远程矩阵结果以对应提交的 Actions 记录为准。矩阵设置为 `fail-fast: false`，确保每个平台都完成验证。
