@@ -43,29 +43,33 @@ test("device-mode selection uses only advertised MJPEG modes (hardware response 
   await page.route("**/api/video-settings", (route) =>
     route.fulfill({ json: { video: route.request().postDataJSON() } }),
   );
-  await page.locator("#refresh-button").click();
-  await page.locator("#screen-button").click();
-  await expect(page.locator("#resolution-select")).toBeDisabled();
-  releaseStatus();
-  await expect(page.locator("#resolution-select")).toHaveValue("1920x1080");
-  await page.locator("#resolution-select").selectOption("1280x720");
-  await expect(page.locator("#refresh-rate-select")).toHaveValue("60");
-  // The next status poll must not reset the user's unapplied selection.
-  statusMessage = "unchanged capabilities";
-  await expect(page.locator("#info-error")).toHaveText(statusMessage, {
-    timeout: 10000,
-  });
-  await expect(page.locator("#resolution-select")).toHaveValue("1280x720");
-  await expect(page.locator("#refresh-rate-select")).toHaveValue("60");
-  const update = page.waitForRequest((r) =>
-    r.url().endsWith("/api/video-settings"),
-  );
-  await page.locator("#apply-screen-settings").click();
-  expect((await update).postDataJSON()).toEqual({
-    width: 1280,
-    height: 720,
-    fps: 60,
-  });
+  try {
+    await page.locator("#refresh-button").click();
+    await page.locator("#screen-button").click();
+    await expect(page.locator("#resolution-select")).toBeDisabled();
+    releaseStatus();
+    await expect(page.locator("#resolution-select")).toHaveValue("1920x1080");
+    await page.locator("#resolution-select").selectOption("1280x720");
+    await expect(page.locator("#refresh-rate-select")).toHaveValue("60");
+    // The next status poll must not reset the user's unapplied selection.
+    statusMessage = "unchanged capabilities";
+    await expect(page.locator("#info-error")).toHaveText(statusMessage, {
+      timeout: 10000,
+    });
+    await expect(page.locator("#resolution-select")).toHaveValue("1280x720");
+    await expect(page.locator("#refresh-rate-select")).toHaveValue("60");
+    const update = page.waitForRequest((r) =>
+      r.url().endsWith("/api/video-settings"),
+    );
+    await page.locator("#apply-screen-settings").click();
+    expect((await update).postDataJSON()).toEqual({
+      width: 1280,
+      height: 720,
+      fps: 60,
+    });
+  } finally {
+    releaseStatus();
+  }
 });
 test("disconnected HID disables screen keyboard and failed video shows No Signal", async ({
   page,
@@ -96,6 +100,13 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#video-frame")).toHaveClass(/visible/);
 });
 
+test.afterEach(async ({ page }) => {
+  // Applying settings and periodic polls may still be inside route.fetch/json
+  // after the last assertion. Drain handlers before Playwright disposes their
+  // API responses and browser context, preserving any real handler errors.
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 test("a delayed startup idle status cannot hide a decoded live frame", async ({
   page,
 }) => {
@@ -111,20 +122,24 @@ test("a delayed startup idle status cannot hide a decoded live frame", async ({
     await gate;
     await route.fulfill({ json: data });
   });
-  await page.reload({ waitUntil: "domcontentloaded" });
-  // The status response is still held: only a real decoded image can show video.
-  await expect(page.locator("#video-frame")).toHaveClass(/visible/);
-  expect(
-    await page
-      .locator("#video-frame")
-      .evaluate((image: HTMLImageElement) => image.naturalWidth),
-  ).toBe(1280);
-  releaseStatus();
-  await expect(page.locator("#info-error")).toHaveText(
-    "delayed startup status",
-  );
-  await expect(page.locator("#video-frame")).toHaveClass(/visible/);
-  await expect(page.locator("#no-signal")).toBeHidden();
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    // The status response is still held: only a real decoded image can show video.
+    await expect(page.locator("#video-frame")).toHaveClass(/visible/);
+    expect(
+      await page
+        .locator("#video-frame")
+        .evaluate((image: HTMLImageElement) => image.naturalWidth),
+    ).toBe(1280);
+    releaseStatus();
+    await expect(page.locator("#info-error")).toHaveText(
+      "delayed startup status",
+    );
+    await expect(page.locator("#video-frame")).toHaveClass(/visible/);
+    await expect(page.locator("#no-signal")).toBeHidden();
+  } finally {
+    releaseStatus();
+  }
 });
 test("original KVM toolbar, zoom, screen keyboard, sticky combinations, pointer and settings", async ({
   page,
