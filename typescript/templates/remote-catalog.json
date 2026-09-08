@@ -1,0 +1,31 @@
+{
+  "models": [
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "description": "默认：速度和能力平衡，支持工具调用"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "description": "更强：复杂任务，响应和费用更高"
+    },
+    {
+      "id": "deepseek-chat",
+      "name": "DeepSeek Chat（兼容）",
+      "description": "兼容旧配置，官方建议逐步迁移到 V4 Flash"
+    },
+    {
+      "id": "deepseek-reasoner",
+      "name": "DeepSeek Reasoner（兼容）",
+      "description": "兼容旧配置，官方建议逐步迁移到 V4 系列"
+    }
+  ],
+  "vision_models": [
+    {
+      "id": "deepseek-v4-flash-vision-exp",
+      "name": "DeepSeek V4 Flash Vision Exp",
+      "description": "按需理解 KVM 截图；不会持续上传视频"
+    }
+  ]
+}

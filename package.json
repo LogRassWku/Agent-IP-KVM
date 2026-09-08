@@ -1,0 +1,32 @@
+{
+  "name": "agent-ip-kvm",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsx typescript/build.ts",
+    "typecheck": "tsc -p typescript/tsconfig.tests.json --noEmit && tsc -p typescript/ui/tsconfig.json --noEmit",
+    "start": "node dist/cli.js",
+    "dev": "tsx typescript/src/cli.ts",
+    "test": "tsx --test typescript/tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm run build && npm test && npm run test:e2e"
+  },
+  "dependencies": {
+    "sharp": "^0.35.4",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.5.0",
+    "esbuild": "^0.28.2",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

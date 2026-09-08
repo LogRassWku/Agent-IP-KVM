@@ -1,0 +1,122 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "get_controlled_host_info",
+      "description": "读取开发板缓存的被控主机只读清单，包括操作系统、整机型号、BIOS、CPU、GPU、内存、物理磁盘、分区、卷和网络地址。回答硬件或系统事实前使用。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_kvm_status",
+      "description": "读取当前视频流和 USB HID 的连接状态。它只能说明链路是否可用，不能代替屏幕截图。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "capture_screen",
+      "description": "请求开发板从采集卡按需取得当前屏幕的一帧，交给独立视觉模型理解，并返回结构化屏幕内容。用户询问当前屏幕、界面状态或动作结果时使用；低置信度或失败时必须如实说明。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "本次截图用于回答什么问题"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "propose_hid_actions",
+      "description": "向当前被控主机提出经过校验的 USB HID 键盘动作计划。此工具只创建计划；按键和文本输入会在网页显示审批卡，用户批准后才执行。不能用于任意 Shell、鼠标或磁盘直写。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "objective": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "用户要求完成的具体目标"
+          },
+          "target": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "目标设备，通常为当前已连接的被控主机"
+          },
+          "actions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "key_tap",
+                    "type_text",
+                    "wait",
+                    "release_all"
+                  ]
+                },
+                "key": {
+                  "type": "string",
+                  "maxLength": 20,
+                  "description": "标准键名，例如 win、enter、f2、esc、a"
+                },
+                "modifiers": {
+                  "type": "array",
+                  "maxItems": 4,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "ctrl",
+                      "shift",
+                      "alt",
+                      "win"
+                    ]
+                  }
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 512,
+                  "description": "通过美式键盘布局输入的可打印 ASCII 文本"
+                },
+                "seconds": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 2
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "objective",
+          "actions"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+]

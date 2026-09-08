@@ -1,0 +1,32 @@
+# 迁移验证记录
+
+日期：2026-09-08。基线：`d669afe36984abe10866f949b17300f578b000cf`（`origin/main`）。
+
+## 实际执行
+
+| 检查 | 环境 | 结果 |
+|---|---|---|
+| 原 Python `unittest discover -s tests` | Windows、Python 3.13.14 | 78 通过 |
+| `npm run typecheck` | Windows、Node 24.17.0、TypeScript 7.0.2 | 通过；包括后端、测试、构建代码和 UI |
+| `npm run build` | Windows | 通过 |
+| `npm test` | Windows | 29 通过、0 跳过 |
+| `npm run test:e2e` | Chromium 153、桌面 1440×1000、移动端 390×844 | 6 通过 |
+| `npm run check` | 上述完整组合 | 通过 |
+| `npm audit --omit=dev` | 当前锁文件 | 0 漏洞报告 |
+
+测试实际覆盖：RGB 彩条像素、可解码 JPEG、MJPEG 分帧／共享、暂停重连、真实 FFmpeg 文件播放／EOF／重播／缺失程序、HTTP 请求校验、原静态资源字节比对、原 POST 路由覆盖、键鼠输入校验、HID 报告字节、异常释放、紧急停止、审批摘要／过期／拒绝／重复执行、主机信息嵌套校验、配对、安装任务与进度、启动脚本密钥保护、会话墓碑、后台作业去重、远程工具与单张视觉请求。
+
+浏览器覆盖：原工具栏、缩放位置稳定、屏幕键盘、粘滞组合键、指针坐标和右键、设备面板、模拟源不允许改分辨率、真实设备模式列表的模拟响应、断开 HID 禁用键盘、No Signal、只读 Agent、批准／拒绝、会话重载、模型配置卡、移动端侧栏。
+
+完整回归期间发现并修复了文件源的批量帧丢失：FFmpeg 可能在一次管道读取中输出多帧，文件源现通过暂停／恢复读取保留所有帧；实时采集仍保留最新帧以控制延迟。
+
+## 没有执行的验证
+
+- 没有 RDK X5；没有测试真实 USB HID、ConfigFS 重绑、真实 UVC 采集、USB 唤醒、UEFI、1080p30 性能或开发板重启恢复。
+- 没有运行 `typescript/linux/` 安装脚本，没有修改系统服务或硬件配置。
+- 没有实际安装 PC Agent／Ollama／模型。安装测试只使用模拟 HID 和认证的模拟进度上报。
+- 没有真实远程模型调用。目录保持 Python 基线，提供商可用性和视觉效果仍需接入验证。
+- CI 已配置，但该记录不代表 GitHub Actions 的 Windows/Linux、Node 22/24 矩阵已经成功执行。
+- 后端和测试 strict 类型检查通过；UI 保留渐进式类型检查设置，详见 README。
+
+`src/agent_ip_kvm/`、原 Python `tests/` 和原 `scripts/` 未修改。原 HTML、CSS、SVG 原样保留到新目录。原 README 的实机记录仅属于 Python 基线。

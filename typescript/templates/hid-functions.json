@@ -1,0 +1,42 @@
+[
+  {
+    "name": "hid.keyboard",
+    "role": "boot_keyboard",
+    "protocol": 1,
+    "subclass": 1,
+    "report_length": 8,
+    "report_descriptor_size": 63,
+    "report_descriptor_sha256": "14bdd69b3b46b4e8a093865c10c75b6a9aaf85f7986f146d87a437e7f7afa476",
+    "report_descriptor_hex": "05010906a101050719e029e71500250175019508810295017508810195057501050819012905910295017503910195067508150025650507190029658100c0"
+  },
+  {
+    "name": "hid.mouse",
+    "role": "relative_mouse",
+    "protocol": 2,
+    "subclass": 1,
+    "report_length": 4,
+    "report_descriptor_size": 52,
+    "report_descriptor_sha256": "e932932fb80ef3be698b209ac63f884452666275aa7d6a1cc1af5f7ac3c1b81b",
+    "report_descriptor_hex": "05010902a1010901a1000509190129051500250195057501810295017503810105010930093109381581257f750895038106c0c0"
+  },
+  {
+    "name": "hid.pointer",
+    "role": "absolute_pointer",
+    "protocol": 0,
+    "subclass": 0,
+    "report_length": 6,
+    "report_descriptor_size": 58,
+    "report_descriptor_sha256": "d9b93f5aa0cb2ab2f041d8c2da5f5b6c527e74192e2f1efa15c4844bec079621",
+    "report_descriptor_hex": "05010902a1010901a1000509190129081500250195087501810205010930093116000026ff7f75109502810209381581257f750895018106c0c0"
+  },
+  {
+    "name": "hid.power",
+    "role": "system_control",
+    "protocol": 0,
+    "subclass": 0,
+    "report_length": 1,
+    "report_descriptor_size": 27,
+    "report_descriptor_sha256": "103a56931b886995472eea5e7e976c0278a0930a86826e4441f829dbe2631128",
+    "report_descriptor_hex": "05010980a1011500250175019503098109820983810295058101c0"
+  }
+]

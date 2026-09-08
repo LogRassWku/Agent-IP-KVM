@@ -19,3 +19,10 @@ Thumbs.db
 *.log
 data/
 runtime/
+
+# TypeScript build, dependencies and browser test artifacts
+node_modules/
+dist/
+test-results/
+playwright-report/
+*.tsbuildinfo

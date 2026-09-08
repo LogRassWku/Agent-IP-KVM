@@ -1,5 +1,15 @@
 # Agent IP KVM
 
+> **TypeScript 重构分支**：Windows 模拟版已实现，保留原 Python 源码、UI 和脚本。运行方式、测试范围及尚未实机验证的 Linux / RDK X5 部分见 [TypeScript 使用说明](typescript/README.md)。下文原有硬件验证记录属于 Python 版本。
+
+```powershell
+npm ci
+npm run build
+npm start -- --source synthetic --enable-hid --hid-backend simulated
+```
+
+在浏览器打开 `http://127.0.0.1:8080`。默认 TypeScript 数据目录为 `data/typescript/`。
+
 Agent IP KVM 是一个面向多种 Linux 开发板的开源智能 IP KVM 项目。项目计划通过视频采集、USB HID、权限控制和 Agent 协作，让用户远程观察并受控操作电脑的操作系统、安装环境和 BIOS／UEFI。
 
 RDK X5 是第一个开发与验证平台，但核心软件不绑定单一型号。不同开发板通过适配层接入各自的视频采集、USB Gadget、硬件加速和系统管理能力。

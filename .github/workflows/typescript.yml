@@ -1,0 +1,30 @@
+name: TypeScript rewrite
+on:
+  push:
+    branches: [typescript-rewrite]
+  pull_request:
+    paths: ['typescript/**', 'package*.json', 'tsconfig.json', 'playwright.config.ts', '.github/workflows/typescript.yml']
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.node }}
+          path: |
+            work/playwright-report
+            work/playwright-results
+            work/e2e-*.png
