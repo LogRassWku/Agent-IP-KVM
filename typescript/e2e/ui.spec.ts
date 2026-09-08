@@ -95,6 +95,37 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#video-frame")).toHaveClass(/visible/);
 });
+
+test("a delayed startup idle status cannot hide a decoded live frame", async ({
+  page,
+}) => {
+  let releaseStatus!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseStatus = resolve;
+  });
+  await page.route("**/api/status", async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    data.stream = { state: "idle", sequence: null, error: null };
+    data.source.error = "delayed startup status";
+    await gate;
+    await route.fulfill({ json: data });
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  // The status response is still held: only a real decoded image can show video.
+  await expect(page.locator("#video-frame")).toHaveClass(/visible/);
+  expect(
+    await page
+      .locator("#video-frame")
+      .evaluate((image: HTMLImageElement) => image.naturalWidth),
+  ).toBe(1280);
+  releaseStatus();
+  await expect(page.locator("#info-error")).toHaveText(
+    "delayed startup status",
+  );
+  await expect(page.locator("#video-frame")).toHaveClass(/visible/);
+  await expect(page.locator("#no-signal")).toBeHidden();
+});
 test("original KVM toolbar, zoom, screen keyboard, sticky combinations, pointer and settings", async ({
   page,
 }) => {

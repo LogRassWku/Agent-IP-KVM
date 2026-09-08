@@ -150,6 +150,74 @@ test("shared stream opens one source, terminates cleanly at EOF and encodes no M
   assert.equal(v.status().state, "ended");
   await v.close();
 });
+test(
+  "a viewer arriving during last-viewer cleanup receives a new stream",
+  { timeout: 5000 },
+  async (t) => {
+    let releaseClose!: () => void;
+    let closingStarted!: () => void;
+    const closeGate = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closing = new Promise<void>((resolve) => {
+      closingStarted = resolve;
+    });
+    let sources = 0;
+    class SlowClosingSource extends SyntheticSource {
+      private firstClose = true;
+      override async close() {
+        await super.close();
+        if (this.firstClose) {
+          this.firstClose = false;
+          closingStarted();
+          await closeGate;
+        }
+      }
+    }
+    const video = new VideoController(config, () =>
+      sources++ === 0 ? new SlowClosingSource() : new SyntheticSource(),
+    );
+    t.after(async () => {
+      releaseClose();
+      await video.close();
+    });
+    let unsubscribe!: () => void;
+    await new Promise<void>((resolve) => {
+      unsubscribe = video.subscribe((frame) => {
+        if (frame) resolve();
+      });
+    });
+    unsubscribe();
+    await closing;
+    const reconnected = new Promise<boolean>((resolve) => {
+      video.subscribe((frame) => resolve(Boolean(frame)));
+    });
+    releaseClose();
+    assert.equal(
+      await reconnected,
+      true,
+      "cleanup must not end the incoming viewer's response",
+    );
+    assert.equal(sources, 2);
+  },
+);
+
+test("a subscription cancelled before registration never starts capture", async () => {
+  let sources = 0;
+  const video = new VideoController(config, () => {
+    sources++;
+    return new SyntheticSource();
+  });
+  let callbacks = 0;
+  video.subscribe(() => {
+    callbacks++;
+  })();
+  // Flush pending registration and cleanup through the controller's lock.
+  await video.pause();
+  assert.equal(sources, 0);
+  assert.equal(callbacks, 0);
+  await video.close();
+});
 test("MJPEG parser accepts arbitrarily split markers and multiple frames", () => {
   const p = new JpegParser();
   assert.deepEqual(p.push(Buffer.from([0, 255])), []);

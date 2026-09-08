@@ -455,12 +455,16 @@ export class VideoController {
     });
   }
   subscribe(listener: (frame?: Snapshot) => void) {
-    this.listeners.add(listener);
+    let cancelled = false;
     void this.lock.run(async () => {
+      if (cancelled) return;
       if (this.stopped) {
         listener();
         return;
       }
+      // Register after any pending cleanup has finished, so an old viewer's
+      // disconnect cannot close a newly arriving viewer's response.
+      this.listeners.add(listener);
       if (this.pump) {
         if (this.latest) listener(this.latest);
         return;
@@ -469,8 +473,10 @@ export class VideoController {
       this.pump = this.produce(generation);
     });
     return () => {
-      this.listeners.delete(listener);
-      if (this.listeners.size === 0) void this.pause();
+      if (cancelled) return;
+      cancelled = true;
+      const removed = this.listeners.delete(listener);
+      if (removed && this.listeners.size === 0) void this.pause();
     };
   }
   private async produce(generation: number) {

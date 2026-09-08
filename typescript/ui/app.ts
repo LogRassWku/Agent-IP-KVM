@@ -27,6 +27,7 @@ const elements = {
 
 let videoModes = [];
 let screenModesSignature = "";
+let streamFrameLoaded = false;
 let hidEnabled = false;
 let zoomPercent = 100;
 const activeModifiers = new Set();
@@ -263,7 +264,9 @@ function updateStatus(payload) {
   }
   const available = source?.health === "available" && stream?.state !== "error" && stream?.state !== "ended";
   elements.noSignal.classList.toggle("unavailable", !available);
-  const hasFrame = stream?.state === "streaming" && Number.isInteger(stream?.sequence);
+  // Status can describe the instant before this browser connected. An idle
+  // response arriving after image load must not hide an already decoded frame.
+  const hasFrame = !agentMode && streamFrameLoaded && available;
   elements.videoFrame.classList.toggle("visible", hasFrame); elements.noSignal.hidden = hasFrame;
   text("info-backend", source?.backend); text("info-source", source?.source_id); text("info-health", source?.health);
   text("info-format", modeLabel(source?.capabilities, "format"));
@@ -285,11 +288,13 @@ function updatePowerStatus(power) {
 
 function connectStream() {
   if (agentMode) return;
+  streamFrameLoaded = false;
   elements.videoFrame.classList.remove("visible"); elements.noSignal.hidden = false;
   elements.videoFrame.src = `/api/stream.mjpg?t=${Date.now()}`;
 }
 
 function disconnectStream() {
+  streamFrameLoaded = false;
   elements.videoFrame.classList.remove("visible");
   elements.videoFrame.removeAttribute("src");
   elements.noSignal.hidden = false;
@@ -1260,8 +1265,8 @@ elements.settingsButton.addEventListener("click", () => { setScreenMenu(false); 
 elements.closeSettings.addEventListener("click", () => setPanel(false));
 elements.backdrop.addEventListener("click", () => setPanel(false));
 elements.refreshButton.addEventListener("click", () => { connectStream(); refreshStatus(); });
-elements.videoFrame.addEventListener("load", () => { elements.videoFrame.classList.add("visible"); elements.noSignal.hidden = true; });
-elements.videoFrame.addEventListener("error", () => { elements.videoFrame.classList.remove("visible"); elements.noSignal.hidden = false; refreshStatus(); });
+elements.videoFrame.addEventListener("load", () => { if (agentMode || !elements.videoFrame.hasAttribute("src")) return; streamFrameLoaded = true; elements.videoFrame.classList.add("visible"); elements.noSignal.hidden = true; });
+elements.videoFrame.addEventListener("error", () => { streamFrameLoaded = false; elements.videoFrame.classList.remove("visible"); elements.noSignal.hidden = false; refreshStatus(); });
 elements.screenButton.addEventListener("click", () => setScreenMenu(elements.screenMenu.hidden));
 elements.powerButton.addEventListener("click", () => setPowerMenu(elements.powerMenu.hidden));
 elements.powerAction.addEventListener("click", async () => {
