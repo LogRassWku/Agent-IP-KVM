@@ -1,6 +1,6 @@
 # TypeScript 版本
 
-本目录基于实际 Python 源码迁移。开发分支是 `typescript-rewrite`。原 `src/agent_ip_kvm/`、`tests/`、`scripts/` 和 Python 启动方式保留。
+本目录基于实际 Python 源码迁移。TypeScript 版本现位于默认主分支 `main`（原 `typescript-rewrite`）；完整原 Python 版本保存在 [`legacy` 分支](https://github.com/LogRassWku/Agent-IP-KVM/tree/legacy)。原 `src/agent_ip_kvm/`、`tests/`、`scripts/` 和 Python 启动方式保留。
 
 ## Windows 模拟运行
 

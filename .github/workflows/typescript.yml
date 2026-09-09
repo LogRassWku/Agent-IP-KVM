@@ -1,7 +1,7 @@
 name: TypeScript rewrite
 on:
   push:
-    branches: [typescript-rewrite]
+    branches: [main]
   pull_request:
     paths: ['typescript/**', 'package*.json', 'tsconfig.json', 'playwright.config.ts', '.github/workflows/typescript.yml']
 jobs:

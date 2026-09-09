@@ -1,6 +1,6 @@
 # Agent IP KVM
 
-> **TypeScript 重构分支**：Windows 模拟版已实现，保留原 Python 源码、UI 和脚本。运行方式、测试范围及尚未实机验证的 Linux / RDK X5 部分见 [TypeScript 使用说明](typescript/README.md)。下文原有硬件验证记录属于 Python 版本。
+> **TypeScript 主分支（`main`）**：Windows 模拟版已实现，保留原 UI 和交互。原 Python 版本保存在 [`legacy` 分支](https://github.com/LogRassWku/Agent-IP-KVM/tree/legacy)。运行方式、测试范围及尚未实机验证的 Linux / RDK X5 部分见 [TypeScript 使用说明](typescript/README.md)。下文原有硬件验证记录属于 Python 版本。
 
 ```powershell
 npm ci
@@ -9,6 +9,10 @@ npm start -- --source synthetic --enable-hid --hid-backend simulated
 ```
 
 在浏览器打开 `http://127.0.0.1:8080`。默认 TypeScript 数据目录为 `data/typescript/`。
+
+## Python legacy 版本历史说明
+
+以下保留原 Python 版本的说明与实机记录。使用完整原版请切换到 `legacy` 分支；这些记录不代表 TypeScript 版本已完成实机验证。
 
 Agent IP KVM 是一个面向多种 Linux 开发板的开源智能 IP KVM 项目。项目计划通过视频采集、USB HID、权限控制和 Agent 协作，让用户远程观察并受控操作电脑的操作系统、安装环境和 BIOS／UEFI。
 
