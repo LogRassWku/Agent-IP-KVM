@@ -1,6 +1,20 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { hostSchema } from "./host-schema.js";
+export { hostSchema } from "./host-schema.js";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  openSync,
+  closeSync,
+  fstatSync,
+  readSync,
+  renameSync,
+  statSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { SESSION_MAX_BYTES } from "./contracts.js";
 import {
   ApiError,
   atomicJson,
@@ -13,7 +27,10 @@ import {
 } from "./common.js";
 
 export class AuditLog {
-  constructor(public path: string) {}
+  constructor(
+    public path: string,
+    private maxBytes = 4 * 1024 * 1024,
+  ) {}
   record(event: string, fields: JsonObject = {}) {
     const entry = {
       timestamp: now(),
@@ -22,12 +39,31 @@ export class AuditLog {
       ...fields,
     };
     mkdirSync(dirname(this.path), { recursive: true });
-    appendFileSync(this.path, JSON.stringify(entry) + "\n", { mode: 0o600 });
+    const line = JSON.stringify(entry) + "\n";
+    if (
+      existsSync(this.path) &&
+      statSync(this.path).size + Buffer.byteLength(line) > this.maxBytes
+    )
+      renameSync(this.path, this.path + ".1");
+    appendFileSync(this.path, line, { mode: 0o600 });
     return entry;
   }
   recent(limit = 50): JsonObject[] {
-    if (!existsSync(this.path)) return [];
-    return readFileSync(this.path, "utf8")
+    // Read at most the bounded tail of each rotation, never the entire history.
+    const tail = (path: string) => {
+      if (!existsSync(path)) return "";
+      const fd = openSync(path, "r");
+      try {
+        const size = fstatSync(fd).size;
+        const buffer = Buffer.alloc(Math.min(size, 256 * 1024));
+        readSync(fd, buffer, 0, buffer.length, size - buffer.length);
+        const text = buffer.toString("utf8");
+        return size > buffer.length ? text.slice(text.indexOf("\n") + 1) : text;
+      } finally {
+        closeSync(fd);
+      }
+    };
+    return (tail(this.path + ".1") + tail(this.path))
       .trim()
       .split("\n")
       .slice(-Math.max(1, Math.min(limit, 200)))
@@ -69,111 +105,6 @@ export class PeerAuth {
     return t;
   }
 }
-const txt = z
-  .string()
-  .trim()
-  .max(512)
-  .nullish()
-  .transform((v) => v || null);
-const required = z.string().trim().min(1).max(512);
-const num = z
-  .number()
-  .int()
-  .nonnegative()
-  .nullish()
-  .transform((v) => v ?? null);
-const bool = z
-  .boolean()
-  .nullish()
-  .transform((v) => v ?? null);
-const list = <T extends z.ZodType>(schema: T) =>
-  z
-    .array(schema)
-    .max(32)
-    .nullish()
-    .transform((v) => v ?? []);
-const partition = z.object({
-  number: num,
-  name: txt,
-  label: txt,
-  filesystem: txt,
-  type: txt,
-  size_bytes: num,
-  free_bytes: num,
-  is_boot: bool,
-  is_system: bool,
-  is_hidden: bool,
-});
-const volume = z.object({
-  name: required,
-  label: txt,
-  filesystem: txt,
-  size_bytes: num,
-  free_bytes: num,
-});
-export const hostSchema = z.object({
-  schema_version: z.literal(1),
-  collected_at: required,
-  hostname: required,
-  os: z.object({
-    name: required,
-    version: txt,
-    build: txt,
-    architecture: txt,
-    last_boot: txt,
-  }),
-  system: z.object({ manufacturer: txt, model: txt }).prefault({}),
-  bios: z
-    .object({
-      manufacturer: txt,
-      version: txt,
-      release_date: txt,
-      secure_boot: z
-        .unknown()
-        .optional()
-        .transform((v) => (typeof v === "boolean" ? v : null)),
-    })
-    .prefault({}),
-  cpu: z
-    .object({
-      model: txt,
-      physical_cores: num,
-      logical_processors: num,
-      max_clock_mhz: num,
-    })
-    .prefault({}),
-  memory: z
-    .object({
-      total_bytes: num,
-      modules: list(
-        z.object({
-          capacity_bytes: num,
-          speed_mts: num,
-          manufacturer: txt,
-          part_number: txt,
-        }),
-      ),
-    })
-    .prefault({}),
-  gpus: list(
-    z.object({ name: required, driver_version: txt, memory_bytes: num }),
-  ),
-  disks: list(
-    z.object({
-      number: num,
-      model: required,
-      interface: txt,
-      partition_style: txt,
-      health: txt,
-      operational_status: txt,
-      size_bytes: num,
-      allocated_bytes: num,
-      partitions: list(partition),
-    }),
-  ),
-  volumes: list(volume),
-  network: z.object({ addresses: list(required) }).prefault({}),
-});
 export class HostStore {
   constructor(public path: string) {}
   update(payload: unknown) {
@@ -254,9 +185,14 @@ export const sessionSchema = z
     title: z.string().trim().min(1).max(120),
     createdAt: z.number().optional(),
     updatedAt: z.number().default(0),
+    revision: z.number().int().nonnegative().default(0),
     messages: z.array(messageSchema).max(300),
   })
-  .transform((s) => ({ ...s, createdAt: s.createdAt ?? s.updatedAt }));
+  .transform((s) => ({ ...s, createdAt: s.createdAt ?? s.updatedAt }))
+  .refine(
+    (s) => Buffer.byteLength(JSON.stringify(s)) <= SESSION_MAX_BYTES,
+    "单个会话不能超过 1 MB，请创建新会话",
+  );
 type Session = z.infer<typeof sessionSchema>;
 export class SessionStore {
   private sessions = new Map<string, Session>();
@@ -293,6 +229,18 @@ export class SessionStore {
   upsert(raw: unknown) {
     const s = sessionSchema.parse(raw);
     if (this.deleted.has(s.id)) throw new ApiError("session was deleted");
+    const current = this.sessions.get(s.id);
+    // Lost responses may cause a retry with an old revision. Identical writes
+    // are idempotent; all other edits must match the server's current revision.
+    if (
+      current &&
+      JSON.stringify({ ...s, revision: 0 }) ===
+        JSON.stringify({ ...current, revision: 0 })
+    )
+      return structuredClone(current);
+    if (s.revision !== (current?.revision ?? 0))
+      throw new ApiError("会话已被其他页面更新，请重新读取后合并", 409);
+    s.revision++;
     this.sessions.set(s.id, s);
     this.trim();
     this.save();

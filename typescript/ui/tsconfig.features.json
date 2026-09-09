@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noImplicitAny": true, "strictNullChecks": true },
+  "include": ["api.ts", "session-sync.ts", "formatting.ts", "cards.ts", "host-info.ts", "agent-jobs.ts", "view-types.ts"]
+}

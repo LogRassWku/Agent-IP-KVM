@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsx typescript/build.ts",
-    "typecheck": "tsc -p typescript/tsconfig.tests.json --noEmit && tsc -p typescript/ui/tsconfig.json --noEmit",
+    "typecheck": "tsc -p typescript/tsconfig.tests.json --noEmit && tsc -p typescript/ui/tsconfig.json --noEmit && tsc -p typescript/ui/tsconfig.features.json --noEmit",
     "start": "node dist/cli.js",
     "dev": "tsx typescript/src/cli.ts",
     "test": "tsx --test typescript/tests/*.test.ts",

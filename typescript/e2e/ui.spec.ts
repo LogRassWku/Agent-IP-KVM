@@ -267,3 +267,151 @@ test("mobile toolbar and Agent sidebar remain usable", async ({ page }) => {
   await expect(page.locator("#agent-input")).toBeVisible();
   await page.screenshot({ path: "work/e2e-mobile.png", fullPage: true });
 });
+
+test("failed setup can be retried with a fresh task and cancelled from the UI", async ({
+  page,
+  request,
+}) => {
+  await page.locator("#agent-mode-button").click();
+  await page.locator("#agent-model-button").click();
+  await page.locator('[data-config-model="pc-agent"]').click();
+  await page.locator('[data-setup-action="start"]').click();
+  await expect(page.locator("#agent-conversation")).toContainText(
+    "无法启动配置",
+  );
+  await expect(page.locator('[data-setup-action="start"]')).toHaveText(
+    "检查后重试",
+  );
+  const first = (
+    await (await request.get("/api/model-setup/tasks/latest")).json()
+  ).task;
+  expect(first.status).toBe("failed");
+  const retry = page.waitForResponse((r) =>
+    r.url().endsWith("/api/model-setup/launch"),
+  );
+  await page.locator('[data-setup-action="start"]').click();
+  await retry;
+  await expect(page.locator(".model-setup-status")).toContainText("配置失败");
+  const next = (
+    await (await request.get("/api/model-setup/tasks/latest")).json()
+  ).task;
+  expect(next.task_id).not.toBe(first.task_id);
+  expect(
+    (
+      await (
+        await request.get(`/api/model-setup/tasks/${first.task_id}`)
+      ).json()
+    ).task.status,
+  ).toBe("cancelled");
+  await page.locator('[data-setup-action="cancel"]').click();
+  await expect(page.locator(".model-setup-status")).toContainText("已取消");
+  await expect(page.locator("[data-setup-action]")).toHaveCount(0);
+});
+
+test("conflicting session edits preserve both the remote version and a local copy", async ({
+  page,
+  request,
+}) => {
+  const id = "conflict-" + Date.now();
+  const initial = {
+    id,
+    title: "原会话",
+    createdAt: 1,
+    updatedAt: 1,
+    messages: [{ role: "user", content: "原消息" }],
+  };
+  const saved = (
+    await (
+      await request.post("/api/agent/sessions", { data: { session: initial } })
+    ).json()
+  ).session;
+  await page.evaluate(
+    (session) =>
+      localStorage.setItem(
+        "agent-ip-kvm.sessions.v1",
+        JSON.stringify({
+          activeId: session.id,
+          sessions: [session],
+          deletedIds: [],
+        }),
+      ),
+    saved,
+  );
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator("#agent-mode-button").click();
+  await expect(page.locator("#agent-chat-title")).toHaveText("原会话");
+  // Intercept only the next save and commit a competing edit before it reaches
+  // the server. This deterministically reproduces a two-browser conflict.
+  let competed = false;
+  await page.route("**/api/agent/sessions", async (route) => {
+    if (
+      !competed &&
+      route.request().method() === "POST" &&
+      route.request().postDataJSON().session.id === id &&
+      route.request().postDataJSON().session.title === "本地修改"
+    ) {
+      competed = true;
+      const all = await (await request.get("/api/agent/sessions")).json();
+      const latest = all.sessions.find((s: { id: string }) => s.id === id);
+      await request.post("/api/agent/sessions", {
+        data: {
+          session: {
+            ...latest,
+            title: "远端修改",
+            messages: [{ role: "user", content: "远端新消息" }],
+          },
+        },
+      });
+    }
+    await route.continue();
+  });
+  page.once("dialog", (dialog) => dialog.accept("本地修改"));
+  await page
+    .locator(".session-item")
+    .filter({ hasText: "原会话" })
+    .locator('[data-session-action="rename"]')
+    .click();
+  await expect(page.locator("#agent-chat-title")).toContainText("本地冲突副本");
+  await expect
+    .poll(async () =>
+      (await (await request.get("/api/agent/sessions")).json()).sessions.some(
+        (s: { title: string }) => s.title.includes("本地冲突副本"),
+      ),
+    )
+    .toBe(true);
+  const all = (await (await request.get("/api/agent/sessions")).json())
+    .sessions;
+  expect(all.find((s: { id: string }) => s.id === id).messages[0].content).toBe(
+    "远端新消息",
+  );
+  expect(
+    all.find((s: { title: string }) => s.title.includes("本地冲突副本"))
+      .messages[0].content,
+  ).toBe("原消息");
+});
+
+test("session sync failure is visible and a later retry clears it", async ({
+  page,
+  request,
+}) => {
+  await page.route("**/api/agent/sessions", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 503, json: { error: "暂时无法保存" } })
+      : route.continue(),
+  );
+  await page.locator("#agent-mode-button").click();
+  await page.locator("#new-agent-chat").click();
+  await expect(page.locator("#session-sync-status")).toContainText("未同步");
+  const id = await page.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem("agent-ip-kvm.sessions.v1")!).activeId,
+  );
+  await page.unrouteAll({ behavior: "wait" });
+  await expect(page.locator("#session-sync-status")).toBeHidden({
+    timeout: 10000,
+  });
+  const saved = (
+    await (await request.get("/api/agent/sessions")).json()
+  ).sessions.find((s: { id: string }) => s.id === id);
+  expect(saved.revision).toBeGreaterThan(0);
+});

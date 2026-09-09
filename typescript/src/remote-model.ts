@@ -106,7 +106,10 @@ export class RemoteModel {
   save(payload: unknown) {
     const p = z
       .object({
-        base_url: z.string().trim().default("https://api.deepseek.com"),
+        base_url: z
+          .string()
+          .trim()
+          .default(this.config?.base_url ?? "https://api.deepseek.com"),
         model: z.string().default("deepseek-v4-flash"),
         vision_model: z.string().nullish(),
         api_key: z.string().nullish(),
@@ -126,7 +129,15 @@ export class RemoteModel {
       !this.catalogData.vision_models.some((m) => m.id === vision)
     )
       throw new ApiError("unsupported remote model");
-    const key = p.api_key?.trim() || this.config?.api_key;
+    const sameOrigin =
+      !this.config ||
+      new URL(base).origin === new URL(this.config.base_url).origin;
+    if (!sameOrigin && !p.api_key?.trim())
+      throw new ApiError(
+        "更换接口地址后需要填写该服务的 API 密钥；不会将原密钥发送到新地址",
+      );
+    const key =
+      p.api_key?.trim() || (sameOrigin ? this.config?.api_key : undefined);
     if (!key || !/^[A-Za-z0-9._-]{20,256}$/.test(key))
       throw new ApiError("api_key must be a non-empty provider key");
     this.config = {

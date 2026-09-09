@@ -227,6 +227,9 @@ export class AgentCoordinator {
     this.audit.record("emergency_stop");
   }
   async execute(payload: unknown) {
+    return this.hid.exclusive(() => this.executeOwned(payload));
+  }
+  private async executeOwned(payload: unknown) {
     const plan = this.lookup(payload, ["ready", "approved"]);
     if (plan.approval_required && plan.status !== "approved")
       throw new ApiError("plan requires approval", 409);
@@ -265,6 +268,8 @@ export class AgentCoordinator {
         if (!["observe", "wait"].includes(action.type))
           entry.verification = await this.observe();
         plan.result.push(entry);
+        if (generation !== this.stopGeneration)
+          throw new ApiError("emergency stop is active", 409);
         this.audit.record("agent_action_completed", {
           plan_id: plan.plan_id,
           plan_digest: plan.digest,
@@ -281,14 +286,22 @@ export class AgentCoordinator {
       try {
         await this.hid.release();
       } catch {}
-      plan.status = "failed";
+      plan.status = generation !== this.stopGeneration ? "stopped" : "failed";
       plan.result.push({ error: String(e) });
-      this.audit.record("plan_execution_failed", {
-        plan_id: plan.plan_id,
-        plan_digest: plan.digest,
-        error: String(e),
-      });
-      throw new ApiError("Agent action failed: " + String(e));
+      this.audit.record(
+        plan.status === "stopped"
+          ? "plan_execution_stopped"
+          : "plan_execution_failed",
+        {
+          plan_id: plan.plan_id,
+          plan_digest: plan.digest,
+          error: String(e),
+        },
+      );
+      throw new ApiError(
+        "Agent action failed: " + String(e),
+        plan.status === "stopped" ? 409 : 400,
+      );
     }
     return structuredClone(plan);
   }

@@ -36,6 +36,7 @@ const states = z.enum([
   "verifying",
   "completed",
   "failed",
+  "cancelled",
 ]);
 const taskSchema = z.object({
   task_id: z.string(),
@@ -153,6 +154,35 @@ export class ModelSetupStore {
       })
       .parse(payload);
     const t = this.task(p.task_id);
+    const order = [
+      "awaiting_start",
+      "starting",
+      "downloading_runtime",
+      "installing_runtime",
+      "downloading_model",
+      "verifying",
+      "completed",
+    ];
+    if (["completed", "failed", "cancelled"].includes(t.status)) {
+      if (t.status === p.status && t.progress === p.progress)
+        return this.public(t);
+      throw new ApiError("配置任务已结束，不能由旧请求改变状态", 409);
+    }
+    if (
+      t.status === "awaiting_start" ||
+      p.status === "awaiting_start" ||
+      p.status === "starting" ||
+      p.status === "cancelled"
+    )
+      throw new ApiError("配置任务尚未启动或状态转换无效", 409);
+    if (
+      p.status !== "failed" &&
+      (order.indexOf(p.status) < order.indexOf(t.status) ||
+        p.progress < t.progress)
+    )
+      throw new ApiError("已忽略过期的配置进度", 409);
+    if (p.status === "completed" && p.progress !== 100)
+      throw new ApiError("完成状态必须为 100%", 400);
     Object.assign(t, p, { updated_at: now() });
     t.events.push({ at: t.updated_at, status: t.status, message: t.message });
     t.events = t.events.slice(-100);
@@ -160,12 +190,38 @@ export class ModelSetupStore {
     return this.public(t);
   }
   starting(id: string) {
-    return this.update({
-      task_id: id,
-      status: "starting",
-      progress: 2,
-      message: "正在被控电脑上启动配置程序",
-    });
+    const t = this.task(id);
+    if (t.status !== "awaiting_start")
+      throw new ApiError("配置任务已经启动，请勿重复发送安装指令", 409);
+    return this.transition(t, "starting", 2, "正在被控电脑上启动配置程序");
+  }
+  failLaunch(id: string, message: string) {
+    const t = this.task(id);
+    if (["awaiting_start", "starting"].includes(t.status))
+      return this.transition(t, "failed", t.progress, message.slice(0, 500));
+    return this.public(t);
+  }
+  cancel(id: string) {
+    const t = this.task(id);
+    if (t.status === "cancelled") return this.public(t);
+    if (!["awaiting_start", "failed"].includes(t.status))
+      throw new ApiError(
+        "安装已启动，不能通过关闭配置卡停止电脑上的安装程序",
+        409,
+      );
+    return this.transition(t, "cancelled", t.progress, "配置已取消");
+  }
+  private transition(
+    t: Task,
+    status: Task["status"],
+    progress: number,
+    message: string,
+  ) {
+    Object.assign(t, { status, progress, message, updated_at: now() });
+    t.events.push({ at: t.updated_at, status, message });
+    t.events = t.events.slice(-100);
+    this.save();
+    return this.public(t);
   }
   bootstrapPath(id: string) {
     const t = this.task(id);

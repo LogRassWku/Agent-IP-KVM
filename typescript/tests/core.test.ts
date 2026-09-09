@@ -514,6 +514,7 @@ test("setup persists tasks, keeps secrets private and quotes bootstrap without B
   assert.ok(script.includes("'token''quoted'"));
   assert.equal(script.charCodeAt(0) === 0xfeff, false);
   assert.ok(!script.includes("__MODEL__"));
+  s.starting(t.task_id);
   assert.equal(
     s.update({
       task_id: t.task_id,

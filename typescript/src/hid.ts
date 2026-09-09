@@ -1,4 +1,5 @@
 import { open, type FileHandle } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
 import { z } from "zod";
 import { ApiError, delay, Mutex, type JsonObject } from "./common.js";
@@ -352,7 +353,29 @@ const shifted: Record<string, string> = Object.fromEntries(
 );
 export class HidController {
   private mutex = new Mutex();
+  private owner?: symbol;
+  private operation = new AsyncLocalStorage<symbol>();
   private stopped = false;
+  private access() {
+    if (this.owner && this.operation.getStore() !== this.owner)
+      throw new ApiError("另一个操作正在使用键鼠，请等待操作结束", 409);
+  }
+  async exclusive<T>(work: () => Promise<T>): Promise<T> {
+    if (this.owner)
+      throw new ApiError("另一个操作正在使用键鼠，请等待操作结束", 409);
+    const owner = Symbol("HID operation");
+    this.owner = owner;
+    return this.operation.run(owner, async () => {
+      try {
+        // Finish an already-running manual input before starting the sequence.
+        await this.mutex.run(async () => {});
+        if (this.stopped) throw new ApiError("emergency stop is active", 409);
+        return await work();
+      } finally {
+        this.owner = undefined;
+      }
+    });
+  }
   constructor(
     public adapter: HidAdapter | undefined,
     public backend = "disabled",
@@ -392,6 +415,7 @@ export class HidController {
     };
   }
   private async ready() {
+    this.access();
     if (this.stopped) throw new ApiError("emergency stop is active");
     await this.sync();
     if (!this.adapter)
@@ -402,12 +426,17 @@ export class HidController {
     return this.adapter;
   }
   private async stroke(a: HidAdapter, p: z.infer<typeof tapSchema>) {
-    for (const m of p.modifiers) await a.keyDown(m);
+    for (const m of p.modifiers) {
+      if (this.stopped) throw new ApiError("emergency stop is active");
+      await a.keyDown(m);
+    }
+    if (this.stopped) throw new ApiError("emergency stop is active");
     await a.keyDown(p.key);
     await a.keyUp(p.key);
     for (const m of [...p.modifiers].reverse()) await a.keyUp(m);
   }
   tap(payload: unknown) {
+    this.access();
     const p = tapSchema.parse(payload);
     return this.mutex.run(async () => {
       const a = await this.ready();
@@ -420,6 +449,7 @@ export class HidController {
     });
   }
   typeText(text: unknown, keyDelay = 8) {
+    this.access();
     const value = z
       .string()
       .min(1)
@@ -445,6 +475,7 @@ export class HidController {
     });
   }
   move(payload: unknown) {
+    this.access();
     const p = z
       .object({
         delta_x: z.number().int().min(-4096).max(4096).default(0),
@@ -457,6 +488,7 @@ export class HidController {
       let x = p.delta_x,
         y = p.delta_y;
       while (x || y) {
+        if (this.stopped) throw new ApiError("emergency stop is active");
         const dx = Math.max(-127, Math.min(127, x)),
           dy = Math.max(-127, Math.min(127, y));
         await a.move(dx, dy);
@@ -468,6 +500,7 @@ export class HidController {
     });
   }
   position(payload: unknown) {
+    this.access();
     const p = z
       .object({ x: absolute, y: absolute, wheel: axis.default(0) })
       .parse(payload);
@@ -478,6 +511,7 @@ export class HidController {
     });
   }
   click(payload: unknown) {
+    this.access();
     const p = z
       .object({
         button: z.enum(["left", "right", "middle"]),
@@ -493,6 +527,7 @@ export class HidController {
       const a = await this.ready();
       try {
         if (p.x !== undefined) await a.position(p.x, p.y!);
+        if (this.stopped) throw new ApiError("emergency stop is active");
         await a.buttonDown(p.button);
         await a.buttonUp(p.button);
       } finally {
@@ -502,7 +537,9 @@ export class HidController {
     });
   }
   release() {
+    this.access();
     return this.mutex.run(async () => {
+      this.access();
       if (this.adapter) await this.adapter.release();
     });
   }
@@ -513,7 +550,9 @@ export class HidController {
     });
   }
   arm() {
+    this.access();
     return this.mutex.run(async () => {
+      this.access();
       await this.adapter?.arm();
       this.stopped = false;
     });

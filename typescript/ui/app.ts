@@ -1,3 +1,9 @@
+import { text, modeLabel } from "./formatting.js";
+import { updateHostInfo } from "./host-info.js";
+import { renderAgentPlan, renderModelSetup, renderRemoteModelSetup } from "./cards.js";
+import { createAgentJobs } from "./agent-jobs.js";
+import { postJson, fetchJson } from "./api.js";
+import { SessionSynchronizer } from "./session-sync.js";
 const elements = {
   noSignal: document.querySelector<HTMLElement>("#no-signal"), videoFrame: document.querySelector<HTMLImageElement>("#video-frame"),
   videoShell: document.querySelector<HTMLElement>("#video-shell"), panel: document.querySelector<HTMLElement>("#settings-panel"),
@@ -52,126 +58,14 @@ let deletedAgentSessionIds = new Set();
 let activeAgentSessionId = "";
 let selectedAgentModel = "qwen2.5-1.5b";
 let modelSetupPollActive = false;
-const pendingSessionSync = new Map();
-const activeAgentJobRequests = new Set();
+
 const legacyAgentProgress = new Set([
   "正在分析并准备安全操作…",
   "正在分析环境并规划操作…",
   "正在识别屏幕并准备安全操作…",
 ]);
 
-const modelSetupStatusNames = {
-  awaiting_start: "等待启动", starting: "正在启动", downloading_runtime: "下载运行环境",
-  installing_runtime: "安装运行环境", downloading_model: "下载模型", verifying: "正在校验",
-  completed: "配置完成", failed: "配置失败",
-};
 
-function text(id, value) { document.querySelector(`#${id}`).textContent = value ?? "--"; }
-
-function modeLabel(capabilities, field) {
-  const mode = capabilities?.[0];
-  if (!mode) return "--";
-  if (field === "resolution") return `${mode.width} × ${mode.height}`;
-  if (field === "fps") return `${Number(mode.fps).toFixed(2)} fps`;
-  return mode.pixel_format;
-}
-
-function formatBytes(value) {
-  if (value === null || value === undefined) return "--";
-  const size = Number(value);
-  if (!Number.isFinite(size) || size < 0) return "--";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let amount = size;
-  let unit = 0;
-  while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit += 1; }
-  return `${amount >= 100 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
-}
-
-function compact(values, separator = " · ") {
-  return values.filter((value) => value !== null && value !== undefined && String(value).trim() !== "").join(separator) || "--";
-}
-
-function renderHostStorage(host) {
-  const container = document.querySelector<HTMLElement>("#host-storage");
-  container.replaceChildren();
-  const disks = host.disks || [];
-  const hasMappedPartitions = disks.some((disk) => (disk.partitions || []).length > 0);
-
-  disks.forEach((disk, index) => {
-    const card = document.createElement("article"); card.className = "storage-card";
-    const title = document.createElement("strong");
-    title.textContent = `磁盘 ${disk.number ?? index} · ${disk.model}`;
-    const detail = document.createElement("span");
-    detail.textContent = compact([formatBytes(disk.size_bytes), disk.interface, disk.partition_style, disk.health]);
-    card.append(title, detail);
-
-    if ((disk.partitions || []).length > 0) {
-      const partitionList = document.createElement("div"); partitionList.className = "storage-partitions";
-      for (const partition of disk.partitions) {
-        const row = document.createElement("div"); row.className = "storage-partition";
-        const name = document.createElement("b");
-        name.textContent = partition.name || `分区 ${partition.number ?? "--"}`;
-        const flags = compact([
-          partition.label,
-          partition.filesystem,
-          partition.type,
-          partition.is_system ? "系统" : null,
-          partition.is_boot ? "启动" : null,
-          partition.is_hidden ? "隐藏" : null,
-        ]);
-        const capacity = partition.free_bytes == null
-          ? `${formatBytes(partition.size_bytes)} 总计`
-          : `${formatBytes(partition.free_bytes)} 可用 / ${formatBytes(partition.size_bytes)} 总计`;
-        const summary = document.createElement("span"); summary.textContent = `${flags}\n${capacity}`;
-        row.append(name, summary); partitionList.append(row);
-      }
-      card.append(partitionList);
-    }
-    container.append(card);
-  });
-
-  if (!hasMappedPartitions && (host.volumes || []).length > 0) {
-    const card = document.createElement("article"); card.className = "storage-card";
-    const title = document.createElement("strong"); title.textContent = "已挂载分区";
-    const partitionList = document.createElement("div"); partitionList.className = "storage-partitions";
-    for (const volume of host.volumes) {
-      const row = document.createElement("div"); row.className = "storage-partition";
-      const name = document.createElement("b"); name.textContent = volume.name;
-      const summary = document.createElement("span");
-      summary.textContent = `${compact([volume.label, volume.filesystem])}\n${formatBytes(volume.free_bytes)} 可用 / ${formatBytes(volume.size_bytes)} 总计`;
-      row.append(name, summary); partitionList.append(row);
-    }
-    card.append(title, partitionList); container.append(card);
-  }
-
-  if (!container.hasChildNodes()) container.textContent = "--";
-}
-
-function updateHostInfo(report) {
-  const state = document.querySelector<HTMLElement>("#host-info-state");
-  const list = document.querySelector<HTMLElement>("#host-info-list");
-  const available = report?.status === "available" && report.data;
-  state.classList.toggle("error", report?.status === "error");
-  state.textContent = available ? "已同步" : report?.status === "error" ? "数据错误" : "未连接";
-  text("host-info-message", report?.message || "尚未收到被控主机信息");
-  list.hidden = !available;
-  if (!available) return;
-
-  const host = report.data;
-  text("host-collected-at", host.collected_at ? new Date(host.collected_at).toLocaleString() : "--");
-  text("host-name", host.hostname);
-  text("host-os", compact([host.os?.name, host.os?.version, host.os?.build ? `Build ${host.os.build}` : null, host.os?.architecture]));
-  text("host-system", compact([host.system?.manufacturer, host.system?.model]));
-  text("host-bios", compact([host.bios?.manufacturer, host.bios?.version, host.bios?.secure_boot == null ? null : `安全启动 ${host.bios?.secure_boot ? "开启" : "关闭"}`]));
-  text("host-cpu", compact([host.cpu?.model, host.cpu?.max_clock_mhz ? `${host.cpu.max_clock_mhz} MHz` : null]));
-  text("host-cores", compact([host.cpu?.physical_cores == null ? null : `${host.cpu.physical_cores} 核`, host.cpu?.logical_processors == null ? null : `${host.cpu.logical_processors} 线程`]));
-  text("host-gpu", (host.gpus || []).map((gpu) => compact([gpu.name, gpu.driver_version ? `驱动 ${gpu.driver_version}` : null])).join("\n") || "--");
-  text("host-memory", formatBytes(host.memory?.total_bytes));
-  const speeds = [...new Set((host.memory?.modules || []).map((module) => module.speed_mts).filter(Boolean))];
-  text("host-memory-speed", speeds.length ? speeds.map((speed) => `${speed} MT/s`).join("、") : "--");
-  renderHostStorage(host);
-  text("host-addresses", (host.network?.addresses || []).join("\n") || "--");
-}
 
 function updateDevices(v4l2) {
   const devices = v4l2?.devices ?? [];
@@ -371,6 +265,11 @@ function setAgentMode(open) {
   }
 }
 
+const { runRemoteAgentJob, applyRemoteAgentResult, resumeRemoteAgentJob, resumePendingAgentJobs } = createAgentJobs({
+  save: () => saveAgentSessions(), renderConversation: () => renderAgentConversation(),
+  renderSessions: () => renderAgentSessions(), activeId: () => activeAgentSessionId,
+  sessions: () => agentSessions,
+});
 function newSessionId() {
   return globalThis.crypto?.randomUUID?.() ?? `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -391,22 +290,44 @@ function saveAgentSessions(sync = true) {
   if (sync) for (const session of agentSessions) queueSessionSync(session);
 }
 
+const syncMessages = new Map<string, string>();
+const sessionSync = new SessionSynchronizer({
+  find: (id) => agentSessions.find(s => s.id === id),
+  saved: (id, revision) => {
+    const session = agentSessions.find(s => s.id === id);
+    if (session) session.revision = revision;
+    saveAgentSessions(false);
+  },
+  status: (id, message) => { syncMessages.set(id, message); renderSyncStatus(); },
+  conflict: (local, remote, deleted) => {
+    const previousId = local.id;
+    // Preserve object identity for an in-flight Agent job's completion callback.
+    const copy = Object.assign(local, { id: newSessionId(), revision: 0, title: (local.title + "（本地冲突副本）").slice(0, 120) });
+    agentSessions = agentSessions.filter(s => s !== local && s.id !== previousId);
+    if (remote && !deleted) agentSessions.push(remote);
+    agentSessions.push(copy);
+    if (activeAgentSessionId === previousId) activeAgentSessionId = copy.id;
+    syncMessages.delete(previousId);
+    syncMessages.set(copy.id, "其他页面已更新此会话，本地内容已保留为独立副本。");
+    saveAgentSessions(false); queueSessionSync(copy);
+    renderAgentSessions(); renderAgentConversation();
+  },
+});
+function renderSyncStatus() {
+  let status = document.querySelector<HTMLElement>("#session-sync-status");
+  if (!status) {
+    status = document.createElement("p"); status.id = "session-sync-status";
+    status.setAttribute("role", "status"); elements.agentChatTitle.after(status);
+  }
+  status.textContent = syncMessages.get(activeAgentSessionId) || "";
+  status.hidden = !status.textContent;
+}
 function queueSessionSync(session) {
-  if (!session?.id || deletedAgentSessionIds.has(session.id)) return;
-  const oldTimer = pendingSessionSync.get(session.id);
-  if (oldTimer) clearTimeout(oldTimer);
-  const timer = window.setTimeout(async () => {
-    pendingSessionSync.delete(session.id);
-    try { await postJson("/api/agent/sessions", { session }); }
-    catch (_) { /* Keep the local copy and retry on the next refresh. */ }
-  }, 150);
-  pendingSessionSync.set(session.id, timer);
+  if (session?.id && !deletedAgentSessionIds.has(session.id)) sessionSync.queue(session);
 }
 
 function queueSessionDelete(sessionId) {
-  const oldTimer = pendingSessionSync.get(sessionId);
-  if (oldTimer) clearTimeout(oldTimer);
-  pendingSessionSync.delete(sessionId);
+  sessionSync.cancel(sessionId);
   window.fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
     .then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); })
     .catch(() => { /* The persisted tombstone retries this deletion during synchronization. */ });
@@ -440,10 +361,10 @@ async function syncAgentSessionsFromBoard() {
     for (const session of remote) {
       if (deletedAgentSessionIds.has(session.id)) continue;
       const local = byId.get(session.id);
-      if (!local || Number(session.updatedAt) >= Number(local.updatedAt)) byId.set(session.id, session);
+      if (!local || (!sessionSync.isDirty(local.id) && Number(session.revision ?? 0) >= Number(local.revision ?? 0))) byId.set(session.id, session);
     }
     for (const session of agentSessions) {
-      if (!remote.some((item) => item.id === session.id)) queueSessionSync(session);
+      if (!remote.some((item) => item.id === session.id) || sessionSync.isDirty(session.id)) queueSessionSync(session);
     }
     for (const sessionId of deletedAgentSessionIds) {
       if (!remoteDeleted.has(sessionId)) queueSessionDelete(sessionId);
@@ -567,170 +488,10 @@ function renderAgentMessage(message) {
   return article;
 }
 
-function renderModelSetup(message) {
-  const setup = message.modelSetup;
-  const card = document.createElement("section");
-  card.className = "model-setup-card";
-  card.dataset.setupMessageId = message.id;
-  const title = document.createElement("h2"); title.textContent = "配置被控电脑模型";
-  const description = document.createElement("p");
-  description.textContent = "由开发板通过 USB 键盘启动安装器；安装进度会持续记录在此会话。";
-  card.append(title, description);
-
-  if (!setup.task) {
-    const fields = document.createElement("div"); fields.className = "model-setup-fields";
-    const modelLabel = document.createElement("label"); modelLabel.textContent = "模型";
-    const modelSelect = document.createElement("select"); modelSelect.dataset.setupField = "model";
-    for (const model of setup.catalog.models ?? []) {
-      const option = document.createElement("option"); option.value = model.id;
-      option.textContent = `${model.name}${model.recommended ? " · 推荐" : ""}`;
-      option.selected = model.id === setup.model; modelSelect.append(option);
-    }
-    modelLabel.append(modelSelect);
-    const locationLabel = document.createElement("label"); locationLabel.textContent = "模型位置";
-    const locationSelect = document.createElement("select"); locationSelect.dataset.setupField = "models_dir";
-    for (const location of setup.catalog.locations ?? []) {
-      const option = document.createElement("option"); option.value = location.models_dir;
-      option.textContent = `${location.models_dir} · ${formatBytes(location.free_bytes)} 可用`;
-      option.selected = location.models_dir === setup.modelsDir; locationSelect.append(option);
-    }
-    locationLabel.append(locationSelect);
-    const installLabel = document.createElement("label"); installLabel.className = "wide"; installLabel.textContent = "Ollama 安装位置";
-    const installInput = document.createElement("input"); installInput.dataset.setupField = "install_dir"; installInput.value = setup.installDir;
-    installInput.autocomplete = "off"; installInput.spellcheck = false; installLabel.append(installInput);
-    fields.append(modelLabel, locationLabel, installLabel); card.append(fields);
-    const start = document.createElement("button"); start.className = "model-setup-start"; start.type = "button";
-    start.dataset.setupAction = "start"; start.textContent = "开始配置"; card.append(start);
-    return card;
-  }
-
-  const task = setup.task;
-  const status = document.createElement("div"); status.className = "model-setup-status";
-  const state = document.createElement("strong"); state.textContent = modelSetupStatusNames[task.status] ?? task.status;
-  const percent = document.createElement("span"); percent.textContent = `${task.progress}%`;
-  status.append(state, percent);
-  const progress = document.createElement("div"); progress.className = "model-setup-progress";
-  progress.style.setProperty("--progress", `${task.progress}%`); progress.append(document.createElement("span"));
-  const messageText = document.createElement("p"); messageText.textContent = task.message;
-  const details = document.createElement("p"); details.textContent = `${task.model} · ${task.models_dir}`;
-  const events = document.createElement("ol"); events.className = "model-setup-events";
-  for (const event of task.events ?? []) { const item = document.createElement("li"); item.textContent = event.message; events.append(item); }
-  card.append(status, progress, messageText, details, events);
-  return card;
-}
-
-function renderRemoteModelSetup(message) {
-  const setup = message.remoteModelSetup;
-  const card = document.createElement("section");
-  card.className = "model-setup-card remote-model-setup";
-  card.dataset.remoteSetupMessageId = message.id;
-  const title = document.createElement("h2"); title.textContent = "配置远程 API";
-  const description = document.createElement("p");
-  description.textContent = "兼容 OpenAI 格式的接口。密钥只保存在开发板，不会回显到网页。";
-  card.append(title, description);
-  const fields = document.createElement("div"); fields.className = "model-setup-fields";
-  const baseLabel = document.createElement("label"); baseLabel.textContent = "接口地址";
-  const baseInput = document.createElement("input"); baseInput.dataset.remoteField = "base_url";
-  baseInput.value = setup.baseUrl || "https://api.deepseek.com"; baseInput.setAttribute("autocomplete", "url");
-  baseLabel.append(baseInput);
-  const modelLabel = document.createElement("label"); modelLabel.textContent = "模型";
-  const modelSelect = document.createElement("select"); modelSelect.dataset.remoteField = "model";
-  for (const model of setup.catalog?.models ?? []) {
-    const option = document.createElement("option"); option.value = model.id;
-    option.textContent = model.name; option.title = model.description;
-    option.selected = model.id === (setup.model || "deepseek-v4-flash"); modelSelect.append(option);
-  }
-  modelLabel.append(modelSelect);
-  const visionLabel = document.createElement("label"); visionLabel.textContent = "屏幕视觉";
-  const visionSelect = document.createElement("select"); visionSelect.dataset.remoteField = "vision_model";
-  const visionModels = Array.isArray(setup.catalog?.vision_models) && setup.catalog.vision_models.length
-    ? setup.catalog.vision_models
-    : [{ id: "deepseek-v4-flash-vision-exp", name: "DeepSeek V4 Flash Vision Exp", description: "按需理解 KVM 截图" }];
-  for (const model of visionModels) {
-    const option = document.createElement("option"); option.value = model.id;
-    option.textContent = model.name; option.title = model.description;
-    option.selected = model.id === (setup.visionModel || "deepseek-v4-flash-vision-exp"); visionSelect.append(option);
-  }
-  visionLabel.append(visionSelect);
-  const keyLabel = document.createElement("label"); keyLabel.className = "wide"; keyLabel.textContent = "API 密钥";
-  const keyInput = document.createElement("input"); keyInput.type = "password"; keyInput.dataset.remoteField = "api_key";
-  keyInput.placeholder = setup.configured ? "已配置，输入新密钥可替换" : "粘贴 DeepSeek API 密钥";
-  keyInput.autocomplete = "new-password"; keyLabel.append(keyInput);
-  fields.append(baseLabel, modelLabel, visionLabel, keyLabel); card.append(fields);
-  const actions = document.createElement("div"); actions.className = "model-setup-actions";
-  const save = document.createElement("button"); save.type = "button"; save.className = "model-setup-start";
-  save.dataset.remoteSetupAction = "save"; save.textContent = "保存配置"; actions.append(save);
-  if (setup.configured) {
-    const test = document.createElement("button"); test.type = "button"; test.className = "model-setup-test";
-    test.dataset.remoteSetupAction = "test"; test.textContent = "测试连接"; actions.append(test);
-  }
-  card.append(actions);
-  if (setup.result) { const result = document.createElement("p"); result.className = "model-setup-result"; result.textContent = setup.result; card.append(result); }
-  return card;
-}
-
-function renderAgentPlan(plan) {
-  const card = document.createElement("section");
-  card.className = `agent-plan risk-${plan.risk}`;
-  card.dataset.planId = plan.plan_id;
-  const header = document.createElement("div"); header.className = "agent-plan-header";
-  const risk = document.createElement("span"); risk.className = "risk-badge";
-  risk.textContent = ({ read_only: "只读", low: "低风险", high: "高风险", critical: "极高风险" })[plan.risk] ?? plan.risk;
-  const status = document.createElement("span"); status.className = "plan-status";
-  status.textContent = ({ ready: "可执行", pending_approval: "等待批准", approved: "已批准", executing: "执行中", completed: "已完成", rejected: "已拒绝", failed: "失败", expired: "已过期" })[plan.status] ?? plan.status;
-  header.append(risk, status); card.append(header);
-
-  const actions = document.createElement("ol"); actions.className = "agent-plan-actions";
-  for (const action of plan.actions ?? []) {
-    const item = document.createElement("li");
-    if (action.type === "observe") item.textContent = "截取一帧并识别画面状态";
-    else if (action.type === "key_tap") item.textContent = `按下并释放 ${action.key}`;
-    else if (action.type === "type_text") item.textContent = `输入文本：${action.text}`;
-    else if (action.type === "wait") item.textContent = `等待 ${action.seconds} 秒`;
-    else item.textContent = "释放全部 HID 输入";
-    actions.append(item);
-  }
-  card.append(actions);
-
-  if (plan.approval_required) {
-    const details = document.createElement("dl"); details.className = "agent-plan-details";
-    const rows = [
-      ["目标", plan.target],
-      ["预期", plan.expected_result],
-      ["异常处理", plan.recovery],
-      ["画面证据", plan.evidence?.frame?.sha256 ? String(plan.evidence.frame.sha256).slice(0, 12) : "未取得"],
-    ];
-    for (const [label, value] of rows) {
-      const row = document.createElement("div");
-      const term = document.createElement("dt"); term.textContent = label;
-      const detail = document.createElement("dd"); detail.textContent = value ?? "--";
-      row.append(term, detail); details.append(row);
-    }
-    card.append(details);
-  }
-
-  if (plan.result?.length) {
-    const result = document.createElement("div"); result.className = "agent-plan-result";
-    const observation = plan.result.flatMap((item) => [item.result, item.verification]).find((item) => item?.frame);
-    result.textContent = observation
-      ? `画面：${observation.recognition?.state ?? "unknown"} · 帧校验 ${String(observation.frame.sha256 ?? "").slice(0, 12)}`
-      : "动作已经执行并记录审计。";
-    card.append(result);
-  }
-  if (plan.status === "pending_approval") {
-    const digest = document.createElement("code"); digest.className = "plan-digest";
-    digest.textContent = `计划校验 ${String(plan.digest).slice(0, 12)}`; card.append(digest);
-    const controls = document.createElement("div"); controls.className = "agent-plan-controls";
-    const reject = document.createElement("button"); reject.type = "button"; reject.dataset.planAction = "reject"; reject.textContent = "拒绝";
-    const approve = document.createElement("button"); approve.type = "button"; approve.className = "approve"; approve.dataset.planAction = "approve"; approve.textContent = "批准并执行";
-    controls.append(reject, approve); card.append(controls);
-  }
-  return card;
-}
-
 function renderAgentConversation() {
   const session = activeAgentSession();
   elements.agentChatTitle.textContent = session.title;
+  renderSyncStatus();
   elements.agentConversation.replaceChildren();
   if (session.messages.length === 0) return;
   for (const message of session.messages) elements.agentConversation.append(renderAgentMessage(message));
@@ -787,132 +548,7 @@ function resizeAgentInput() {
   elements.agentInput.style.height = `${Math.min(130, elements.agentInput.scrollHeight)}px`;
 }
 
-function sleep(milliseconds) {
-  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
-}
 
-function remoteMessagesBefore(session, progressMessage) {
-  const end = session.messages.indexOf(progressMessage);
-  const messages = end >= 0 ? session.messages.slice(0, end) : session.messages;
-  return messages
-    .filter((item) => (item.role === "user" || item.role === "assistant")
-      && !item.modelSetup && !item.remoteModelSetup && !item.transient)
-    .slice(-20)
-    .map((item) => ({ role: item.role, content: String(item.content ?? "") }));
-}
-
-function setAgentJobProgress(session, message, content, jobId = message.agentJobId) {
-  if (!session.messages.includes(message)) return;
-  const changed = message.content !== content || message.agentJobId !== jobId;
-  message.content = content;
-  message.agentJobId = jobId || "";
-  if (!changed) return;
-  session.updatedAt = Date.now();
-  saveAgentSessions();
-  if (session.id === activeAgentSessionId) renderAgentConversation();
-}
-
-async function createRemoteAgentJob(messages, requestId) {
-  let lastError;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      return (await postJson("/api/agent/chat/jobs", { messages, request_id: requestId }, { timeoutMs: 12000 })).job;
-    } catch (error) {
-      lastError = error;
-      if (attempt < 2) await sleep(1000 * (attempt + 1));
-    }
-  }
-  throw lastError;
-}
-
-async function waitForRemoteAgentJob(initialJob, session, progressMessage) {
-  let job = initialJob;
-  const startedAt = Date.now();
-  let failedPolls = 0;
-  while (Date.now() - startedAt < 140000) {
-    if (job?.status === "completed") return job.result;
-    if (job?.status === "failed") throw new Error(job.error || "Agent 后台任务失败");
-    const elapsed = Date.now() - startedAt;
-    const stage = failedPolls > 0
-      ? "网络短暂中断，正在重新获取后台结果…"
-      : elapsed >= 60000
-        ? "远程模型仍在处理，完成后会自动取回结果…"
-        : elapsed >= 20000
-          ? "正在识别屏幕并准备安全操作…"
-          : "正在分析环境并规划操作…";
-    setAgentJobProgress(session, progressMessage, stage, job?.job_id);
-    await sleep(1500);
-    try {
-      job = (await fetchJson(`/api/agent/chat/jobs/${encodeURIComponent(job.job_id)}`, { timeoutMs: 8000 })).job;
-      failedPolls = 0;
-    } catch (_) {
-      failedPolls += 1;
-    }
-  }
-  throw new Error("Agent 后台任务超过 140 秒仍未返回，请重试");
-}
-
-async function runRemoteAgentJob(session, progressMessage) {
-  const requestId = progressMessage.remoteRequestId;
-  if (activeAgentJobRequests.has(requestId)) return null;
-  activeAgentJobRequests.add(requestId);
-  try {
-    const messages = remoteMessagesBefore(session, progressMessage);
-    setAgentJobProgress(session, progressMessage, "正在连接开发板…");
-    let job;
-    if (progressMessage.agentJobId) {
-      try {
-        job = (await fetchJson(`/api/agent/chat/jobs/${encodeURIComponent(progressMessage.agentJobId)}`, { timeoutMs: 8000 })).job;
-      } catch (_) { /* The service may have restarted; the request ID makes recreation idempotent. */ }
-    }
-    if (!job) job = await createRemoteAgentJob(messages, requestId);
-    setAgentJobProgress(session, progressMessage, "正在分析环境并规划操作…", job.job_id);
-    return await waitForRemoteAgentJob(job, session, progressMessage);
-  } finally {
-    activeAgentJobRequests.delete(requestId);
-  }
-}
-
-function applyRemoteAgentResult(session, progressMessage, response) {
-  const jobId = progressMessage.agentJobId;
-  session.messages = session.messages.filter((item) => item !== progressMessage && !(jobId && item.agentJobId === jobId));
-  if (String(response?.response?.content ?? "").trim()) {
-    session.messages.push({
-      role: "assistant", content: response.response.content, createdAt: Date.now(),
-      remoteModel: response.response.model, agentJobId: jobId,
-    });
-  }
-  for (const plan of response?.plans ?? []) {
-    session.messages.push({
-      role: "assistant", content: plan.summary, plan, createdAt: Date.now(),
-      remoteModel: response.response.model, agentJobId: jobId,
-    });
-  }
-}
-
-async function resumeRemoteAgentJob(session, progressMessage) {
-  if (!progressMessage?.remoteRequestId || activeAgentJobRequests.has(progressMessage.remoteRequestId)) return;
-  try {
-    const response = await runRemoteAgentJob(session, progressMessage);
-    if (response) applyRemoteAgentResult(session, progressMessage, response);
-  } catch (error) {
-    session.messages = session.messages.filter((item) => item !== progressMessage);
-    session.messages.push({ role: "assistant", content: `无法处理：${(error instanceof Error ? error.message : String(error))}`, createdAt: Date.now() });
-  } finally {
-    session.updatedAt = Date.now();
-    saveAgentSessions();
-    renderAgentSessions();
-    if (session.id === activeAgentSessionId) renderAgentConversation();
-  }
-}
-
-function resumePendingAgentJobs() {
-  for (const session of agentSessions) {
-    for (const message of session.messages) {
-      if (message?.transient && message.remoteRequestId) resumeRemoteAgentJob(session, message);
-    }
-  }
-}
 
 async function submitAgentPrompt(prompt) {
   const value = String(prompt ?? "").trim();
@@ -973,7 +609,7 @@ async function openPcAgentSetup() {
   const preferred = locations.find((item) => item.drive === "D:") ?? locations[0];
   const session = makeAgentSession();
   session.title = "配置 PC Agent 模型";
-  const task = latest.task && !["completed", "failed"].includes(latest.task.status) ? latest.task : null;
+  const task = latest.task && !["completed", "failed", "cancelled"].includes(latest.task.status) ? latest.task : null;
   session.messages.push({
     id: newSessionId(), role: "assistant", content: task ? "已找到最近的模型配置任务。" : "请选择模型和安装位置。",
     createdAt: Date.now(), modelSetup: {
@@ -983,7 +619,7 @@ async function openPcAgentSetup() {
   });
   agentSessions.push(session); activeAgentSessionId = session.id;
   saveAgentSessions(); renderAgentSessions(); renderAgentConversation();
-  if (task && !["completed", "failed"].includes(task.status)) pollModelSetupTasks();
+  if (task && !["completed", "failed", "cancelled"].includes(task.status)) pollModelSetupTasks();
 }
 
 async function openRemoteModelSetup() {
@@ -1035,15 +671,27 @@ async function testRemoteModelSetup(card) {
   session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation();
 }
 
+async function cancelModelSetup(card) {
+  const session = activeAgentSession();
+  const message = session.messages.find(item => item.id === card.dataset.setupMessageId);
+  if (!message?.modelSetup?.task) return;
+  try {
+    message.modelSetup.task = (await postJson("/api/model-setup/cancel", { task_id: message.modelSetup.task.task_id })).task;
+    message.content = "配置已取消。";
+  } catch (error) { message.content = String(error); }
+  session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation();
+}
+
 async function startModelSetup(card) {
   const session = activeAgentSession();
   const message = session.messages.find((item) => item.id === card.dataset.setupMessageId);
-  if (!message?.modelSetup || message.modelSetup.task) return;
+  if (!message?.modelSetup || (message.modelSetup.task && !["awaiting_start", "failed"].includes(message.modelSetup.task.status))) return;
   const button = card.querySelector("[data-setup-action='start']"); button.disabled = true;
-  const model = card.querySelector("[data-setup-field='model']").value;
-  const modelsDir = card.querySelector("[data-setup-field='models_dir']").value;
-  const installDir = card.querySelector("[data-setup-field='install_dir']").value.trim();
+  const model = message.modelSetup.task?.model ?? card.querySelector("[data-setup-field='model']").value;
+  const modelsDir = message.modelSetup.task?.models_dir ?? card.querySelector("[data-setup-field='models_dir']").value;
+  const installDir = message.modelSetup.task?.install_dir ?? card.querySelector("[data-setup-field='install_dir']").value.trim();
   try {
+    if (message.modelSetup.task) await postJson("/api/model-setup/cancel", { task_id: message.modelSetup.task.task_id });
     const created = await postJson("/api/model-setup/tasks", { model, models_dir: modelsDir, install_dir: installDir });
     message.modelSetup.task = created.task; message.content = "模型配置任务已经创建。";
     session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation();
@@ -1052,6 +700,9 @@ async function startModelSetup(card) {
     session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation(); pollModelSetupTasks();
   } catch (error) {
     message.content = `无法启动配置：${(error instanceof Error ? error.message : String(error))}`;
+    if (message.modelSetup.task) {
+      try { message.modelSetup.task = (await fetchJson(`/api/model-setup/tasks/${message.modelSetup.task.task_id}`)).task; } catch {}
+    }
     session.updatedAt = Date.now(); saveAgentSessions(); renderAgentConversation();
   }
 }
@@ -1064,7 +715,7 @@ async function pollModelSetupTasks() {
     for (const session of agentSessions) {
       for (const message of session.messages) {
         const task = message.modelSetup?.task;
-        if (!task || ["completed", "failed"].includes(task.status)) continue;
+        if (!task || ["completed", "failed", "cancelled"].includes(task.status)) continue;
         pending = true;
         try { message.modelSetup.task = (await fetchJson(`/api/model-setup/tasks/${task.task_id}`)).task; }
         catch (_) { /* Keep the latest visible state during a transient disconnect. */ }
@@ -1144,43 +795,6 @@ async function toggleStickyKeys() {
     resetStickyKeys();
     elements.stickyKeys.disabled = !hidEnabled;
   }
-}
-
-async function postJson(path, payload, options: { timeoutMs?: number } = {}) {
-  const timeoutMs = Number(options.timeoutMs ?? 15000);
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if ((error instanceof Error ? (error instanceof Error ? error.name : "") : "") === "AbortError") throw new Error(`请求超过 ${Math.round(timeoutMs / 1000)} 秒，已停止等待`);
-    throw new Error("无法连接开发板服务，请检查网络后重试");
-  } finally {
-    window.clearTimeout(timer);
-  }
-  const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
-}
-
-async function fetchJson(path, options: { timeoutMs?: number } = {}) {
-  const timeoutMs = Number(options.timeoutMs ?? 15000);
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetch(path, { cache: "no-store", signal: controller.signal });
-  } catch (error) {
-    if ((error instanceof Error ? (error instanceof Error ? error.name : "") : "") === "AbortError") throw new Error(`请求超过 ${Math.round(timeoutMs / 1000)} 秒，已停止等待`);
-    throw new Error("无法连接开发板服务，请检查网络后重试");
-  } finally {
-    window.clearTimeout(timer);
-  }
-  const result = await response.json(); if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result;
 }
 
 function videoContentRect() {
@@ -1340,7 +954,12 @@ elements.agentComposer.addEventListener("submit", (event) => {
 });
 elements.agentConversation.addEventListener("click", (event) => {
   const setupButton = (event.target as HTMLElement).closest<HTMLElement>("[data-setup-action]");
-  if (setupButton) { startModelSetup(setupButton.closest<HTMLElement>("[data-setup-message-id]")); return; }
+  if (setupButton) {
+    const card = setupButton.closest<HTMLElement>("[data-setup-message-id]");
+    if (setupButton.dataset.setupAction === "cancel") cancelModelSetup(card);
+    else startModelSetup(card);
+    return;
+  }
   const remoteSetupButton = (event.target as HTMLElement).closest<HTMLElement>("[data-remote-setup-action]");
   if (remoteSetupButton) {
     const card = remoteSetupButton.closest<HTMLElement>("[data-remote-setup-message-id]");

@@ -7,5 +7,6 @@ await build({
   entryPoints: ["typescript/ui/app.ts"],
   outfile: "dist/web_assets/app.js",
   target: "es2022",
+  bundle: true,
   sourcemap: true,
 });
