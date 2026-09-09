@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,17 @@ import { createKvmServer, POST_ROUTES, resourcePaths } from "../src/server.js";
 import { RemoteModel, validBaseUrl } from "../src/remote-model.js";
 import { delay } from "../src/common.js";
 import { SimulatedHid } from "../src/hid.js";
+
+// Frozen expectations from the legacy commit, independent of current TS assets/routes.
+const baseline: {
+  assetSha256: Record<string, string>;
+  postRoutes: string[];
+} = JSON.parse(
+  readFileSync(
+    new URL("./fixtures/python-baseline.json", import.meta.url),
+    "utf8",
+  ),
+);
 
 const temp = () => mkdtempSync(join(tmpdir(), "agent-kvm-api-"));
 const setup = async (remote?: RemoteModel) => {
@@ -33,22 +45,14 @@ const setup = async (remote?: RemoteModel) => {
 test("HTTP preserves original assets, routes, status fields and real multipart JPEG stream", async (t) => {
   const { app, base, post } = await setup();
   t.after(() => app.close());
-  for (const path of [
-    "/",
-    "/styles.css",
-    "/cursor-small.svg",
-    "/cursor-medium.svg",
-    "/cursor-large.svg",
-  ]) {
+  assert.equal(Object.keys(baseline.assetSha256).length, 5);
+  for (const [path, expectedHash] of Object.entries(baseline.assetSha256)) {
     const r = await fetch(base + path);
     assert.equal(r.status, 200);
-    const original = readFileSync(
-      join(
-        "src/agent_ip_kvm/web_assets",
-        path === "/" ? "index.html" : path.slice(1),
-      ),
-    );
-    assert.deepEqual(Buffer.from(await r.arrayBuffer()), original);
+    const actualHash = createHash("sha256")
+      .update(Buffer.from(await r.arrayBuffer()))
+      .digest("hex");
+    assert.equal(actualHash, expectedHash, path);
   }
   const status = await (await fetch(base + "/api/status")).json();
   assert.equal(status.source.backend, "synthetic");
@@ -417,12 +421,7 @@ test("remote unknown tools and malformed arguments return errors without input; 
 test("every original POST endpoint exists and rejects unsupported operations with structured errors", async (t) => {
   const { app, post } = await setup();
   t.after(() => app.close());
-  const original = readFileSync("src/agent_ip_kvm/web.py", "utf8");
-  const block = original.slice(
-    original.indexOf("if path not in {"),
-    original.indexOf("content_type = self.headers"),
-  );
-  const paths = [...block.matchAll(/"(\/api\/[^\"]+)"/g)].map((m) => m[1]);
+  const paths = baseline.postRoutes;
   assert.ok(paths.length >= 22);
   for (const path of paths) {
     assert.ok(POST_ROUTES.includes(path), path);

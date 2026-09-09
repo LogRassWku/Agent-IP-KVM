@@ -1,6 +1,6 @@
 # TypeScript 版本
 
-本目录基于实际 Python 源码迁移。TypeScript 版本现位于默认主分支 `main`（原 `typescript-rewrite`）；完整原 Python 版本保存在 [`legacy` 分支](https://github.com/LogRassWku/Agent-IP-KVM/tree/legacy)。原 `src/agent_ip_kvm/`、`tests/`、`scripts/` 和 Python 启动方式保留。
+本目录基于实际 Python 源码迁移。TypeScript 版本现位于默认主分支 `main`（原 `typescript-rewrite`）；完整原 Python 版本仅保存在 [`legacy` 分支](https://github.com/LogRassWku/Agent-IP-KVM/tree/legacy)。`main` 已移除 Python 源码、原测试、重复前端和 Python 专用安装脚本，保留共用工具。兼容性测试使用[固定基准样本](tests/fixtures/README.md)，无需 Python 或 Git 历史。
 
 ## Windows 模拟运行
 
@@ -81,7 +81,7 @@ PC Agent 配置界面的“安装”保留原 HID 启动流程。模拟后端仅
 
 ## Linux / RDK X5（未经过实机验证）
 
-TypeScript 的全部硬件路径都尚未实机验证；仓库原 README 中的 X5 实测记录属于 Python 版本，不能沿用到本次重构。
+TypeScript 的全部硬件路径都尚未实机验证；[Python 历史说明](../docs/PYTHON_LEGACY.md)中的 X5 实测记录属于 Python 版本，不能沿用到本次重构。
 
 在独立检出目录构建，安装系统 FFmpeg 和 `v4l2-ctl` 后，可手动启动：
 
@@ -114,7 +114,7 @@ V4L2 使用 `-c:v copy` 转发采集卡 MJPEG，不重新编码。HID 通过 Con
 
 ## 原版保留与回退
 
-原 Python 版本可继续按根 README 的命令启动；当前修改不替换其源码或安装脚本。TypeScript 默认数据目录隔离。需要导入旧会话时先停止对应服务，复制所需 JSON 到新数据目录，保留备份后再启动。不要让两个进程同时写同一个数据文件。
+需要运行原 Python 版本时，在独立目录检出 `legacy` 分支，按 [Python 历史说明](../docs/PYTHON_LEGACY.md)中的命令启动；这些 Python 命令不适用于 `main`。TypeScript 默认数据目录隔离。需要导入旧会话时先停止对应服务，复制所需 JSON 到新数据目录，保留备份后再启动。不要让两个进程同时写同一个数据文件。
 
 ## 2026-09-09 逻辑修复与模块边界
 

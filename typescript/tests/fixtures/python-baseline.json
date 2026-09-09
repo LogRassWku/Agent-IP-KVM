@@ -1,0 +1,39 @@
+{
+  "source": {
+    "repository": "https://github.com/LogRassWku/Agent-IP-KVM",
+    "commit": "d669afe36984abe10866f949b17300f578b000cf",
+    "assets": "src/agent_ip_kvm/web_assets/",
+    "routes": "src/agent_ip_kvm/web.py"
+  },
+  "assetSha256": {
+    "/": "1a6ce0ceb74d0aa3a87704b790455e07c671c0593232d2b0b51a6e51cab8072e",
+    "/styles.css": "41cd0474443faba903cb4912d707bad2aabc7b5af2878e866d15c8e120148dec",
+    "/cursor-small.svg": "27b125e601bbb6cc46399b72f5659107b12fac3abeafc36b55828c5eb38c4688",
+    "/cursor-medium.svg": "1d0add6a119d899e5171f34d5a7a6bf2fe2e013d0789ce12fbd4276ed657aaf7",
+    "/cursor-large.svg": "e948d75157dfdd26d51dc4eece1088ebe30ef64c2d944d5f8c3a3f4ad7fa34b4"
+  },
+  "postRoutes": [
+    "/api/video-settings",
+    "/api/video/pause",
+    "/api/power",
+    "/api/host-info",
+    "/api/hid/key",
+    "/api/hid/mouse-move",
+    "/api/hid/mouse-position",
+    "/api/hid/mouse-click",
+    "/api/hid/release",
+    "/api/agent/plans",
+    "/api/agent/approve",
+    "/api/agent/reject",
+    "/api/agent/execute",
+    "/api/pc-agent/suggestions",
+    "/api/model-setup/tasks",
+    "/api/model-setup/launch",
+    "/api/model-setup/progress",
+    "/api/remote-model/config",
+    "/api/remote-model/test",
+    "/api/agent/chat",
+    "/api/agent/chat/jobs",
+    "/api/agent/sessions"
+  ]
+}

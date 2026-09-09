@@ -1,6 +1,12 @@
 # Agent IP KVM
 
-> **TypeScript 主分支（`main`）**：Windows 模拟版已实现，保留原 UI 和交互。原 Python 版本保存在 [`legacy` 分支](https://github.com/LogRassWku/Agent-IP-KVM/tree/legacy)。运行方式、测试范围及尚未实机验证的 Linux / RDK X5 部分见 [TypeScript 使用说明](typescript/README.md)。下文原有硬件验证记录属于 Python 版本。
+面向 Linux 开发板的智能 IP KVM，通过视频采集、USB HID 和 Agent 协作，远程观察并受控操作电脑。
+
+默认分支 `main` 使用 TypeScript，当前优先支持 Windows 模拟运行，保留原 UI 和交互。完整原 Python 版本保存在 [`legacy` 分支](https://github.com/LogRassWku/Agent-IP-KVM/tree/legacy)。**TypeScript 的 Linux / RDK X5 硬件路径尚未经过实机验证**，历史 Python 实测记录不能视为 TypeScript 的验证结果。
+
+## Windows 快速开始
+
+需要 Node.js 22.12+。在仓库根目录运行：
 
 ```powershell
 npm ci
@@ -8,248 +14,44 @@ npm run build
 npm start -- --source synthetic --enable-hid --hid-backend simulated
 ```
 
-在浏览器打开 `http://127.0.0.1:8080`。默认 TypeScript 数据目录为 `data/typescript/`。
+打开 <http://127.0.0.1:8080>。模拟版提供彩条视频和内存中的键鼠事件，无需 Python 或开发板；运行数据默认写入 `data/typescript/`。
 
-## Python legacy 版本历史说明
+## 开发与测试
 
-以下保留原 Python 版本的说明与实机记录。使用完整原版请切换到 `legacy` 分支；这些记录不代表 TypeScript 版本已完成实机验证。
-
-Agent IP KVM 是一个面向多种 Linux 开发板的开源智能 IP KVM 项目。项目计划通过视频采集、USB HID、权限控制和 Agent 协作，让用户远程观察并受控操作电脑的操作系统、安装环境和 BIOS／UEFI。
-
-RDK X5 是第一个开发与验证平台，但核心软件不绑定单一型号。不同开发板通过适配层接入各自的视频采集、USB Gadget、硬件加速和系统管理能力。
-
-## 当前状态
-
-项目已完成真实 HDMI 采集到浏览器的连续画面闭环和 Web 键盘最小输入链路，并已实现网页坐标到 USB 绝对指针的映射：
-
-- RDK X5 基础系统和远程管理链路已验证。
-- 首款 USB UVC 采集卡已确认故障；替换为 UGREEN 25854 后，RDK X5 已取得真实 HDMI 画面。
-- 已建立平台无关的视频源接口，并以 1280×720、30 fps 的模拟视频源跑通取帧、状态和错误处理。
-- 最小浏览器界面已经能持续显示 UGREEN 25854 的 1920×1080、30 fps MJPEG 画面，并直接转发 JPEG 帧以避免二次编码。
-- 已加入只读 USB Gadget HID 探测工具，并在保留管理网络的情况下完成 Windows 键盘／鼠标枚举和自动回滚。
-- 已建立平台无关的 HID 接口、内存模拟后端和 Linux USB Gadget 后端；RDK X5 已通过 Web 接口向测试电脑发送并释放一个小写 `a`，由 HDMI 回传画面确认字符进入记事本。
-- Web 服务会自动发现已配置并可写的 Linux Gadget 键盘和绝对指针端点；相对鼠标按平台端点能力选配。鼠标进入视频画面后会直接同步绝对位置，并支持左／中／右键点击和滚轮。
-- RDK X5 已安装并实测 `Qwen2.5-1.5B-Instruct Q4_K_M` 板端模型；首轮只读结构化输出可用，常驻模型 API 尚未接入项目。
-
-UGREEN 25854 在 RDK X5 上需要保持 USB 设备唤醒；实测自动休眠会造成 HDMI 热插拔状态反复变化。仓库已提供可安装、可移除的 udev 电源规则。
-
-## 验证模拟视频源
-
-项目当前只需要 Python 3.10 或更高版本，不依赖第三方软件包。在仓库根目录运行：
-
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.cli --frames 30
-```
-
-Windows PowerShell 使用：
+首次运行浏览器测试前安装 Chromium：
 
 ```powershell
-$env:PYTHONPATH='src'
-python -m agent_ip_kvm.cli --frames 30
+npx playwright install chromium
+npm run check
 ```
 
-命令会读取 30 帧模拟画面，并以 JSON 输出分辨率、格式、帧序号、字节数、实测帧率和最终状态。它不会保存截图。
+`check` 包含类型检查、构建、后端测试和浏览器交互测试。具体测试范围与实机待验项目见 [验证记录](typescript/VALIDATION.md)。
 
-也可以通过 FFmpeg 读取本地视频文件：
+## 目录导航
 
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.cli \
-  --source file \
-  --file /path/to/test-video.mp4 \
-  --frames 30
-```
+| 路径 | 用途 |
+|---|---|
+| `typescript/src/` | 当前服务端与硬件适配代码 |
+| `typescript/ui/` | 浏览器端代码与原 UI 资源 |
+| `typescript/tests/`、`typescript/e2e/` | TypeScript 后端与浏览器测试 |
+| `typescript/templates/` | 运行时模板、HID 描述符和恢复包资源 |
+| `typescript/linux/` | TypeScript 版 Linux 安装脚本，待实机验证 |
+| `docs/` | 文档索引、设计资料、项目计划与 Python 历史说明 |
+| `typescript/tests/fixtures/` | 从固定 Python 提交提取的兼容性基准：资源校验值与接口清单 |
+| `scripts/` | 共用 Linux 配置脚本、Windows 主机探针及 UEFI 镜像构建工具；详见[脚本说明](scripts/README.md) |
+| `tools/uefi-test/` | UEFI 测试程序源码与说明 |
+| `.github/workflows/` | Windows / Linux 自动化检查 |
 
-文件源只接受本地存在的文件。它通过 `ffprobe` 读取第一条视频轨的分辨率和帧率，再通过 `ffmpeg` 输出统一的 RGB24 帧；文件自然结束时返回明确的 `end of stream` 状态。
+`package.json`、`tsconfig.json` 和 `playwright.config.ts` 位于根目录，所有 npm 命令也在这里执行。Python 源码、测试和专用安装脚本仅保存在 `legacy` 分支；`main` 的构建与测试无需检出 Python 版本。
 
-## 探测 Linux 视频设备
-
-RDK X5 和其他 Linux 开发板需要安装 `v4l2-ctl`。只查询设备和格式，不读取或保存画面：
-
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.cli --discover-v4l2
-```
-
-输出包含每个 `/dev/video*` 节点的设备名称、驱动、总线、是否支持视频采集，以及离散的像素格式、分辨率和帧率。未安装工具、没有视频设备、单个节点探测失败和在非 Linux 系统运行时，命令会返回对应状态和说明。
-
-当前 RDK X5 实测能够把 UGREEN 25854 的 `/dev/video0` 识别为视频采集节点，并把 `/dev/video1` 识别为元数据节点。设备支持 MJPEG 与 YUYV；项目使用 MJPEG 直通减少板端负载。
-
-## 探测 USB HID 基础能力
-
-在 Linux 开发板上运行以下只读命令：
-
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.hid_cli
-```
-
-它会报告 USB Device Controller、ConfigFS、内核 HID 支持、当前 Gadget 功能，以及修改 Gadget 是否可能切断管理网络。该命令不会创建 HID 设备、重新绑定 USB 控制器或发送键鼠输入。
-
-RDK X5 实测状态为 `in_use`：控制器 `35300000.usb` 已绑定 `RNDIS`、`ECM` 和只读存储功能，当前 USB QuickLink 管理连接依赖其中的网络功能。因此实际接入键鼠前，需要先设计保留管理网络的复合 Gadget 配置和断线恢复方法。
-
-生成标准键盘、相对鼠标和绝对指针的离线复合配置清单：
-
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.hid_cli --plan-composite
-```
-
-输出中的 `generated_only` 始终为 `true`。清单包含标准描述符、报告长度、校验值、需要保留的现有功能和重绑风险，但不会写入 ConfigFS。RDK X5 计划保留 `ECM`、只读存储和 `RNDIS`，再增加独立的 Boot Keyboard、相对鼠标与绝对指针功能。
-
-为未来的实机重绑生成恢复文件包：
-
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.hid_cli \
-  --plan-composite \
-  --write-recovery-bundle ./hid-recovery
-```
-
-文件包包含状态清单、只读预检查、回滚脚本、临时枚举脚本和本地恢复说明。回滚与临时枚举脚本默认都只显示计划；临时枚举只有显式运行 `sudo ./temporary-apply.sh --apply 45` 才会重绑 USB，并会在 45 秒后自动恢复。该脚本只建立键盘、相对鼠标和绝对指针接口，不打开 `/dev/hidg*`，因此不会发送输入。
-
-临时枚举验证通过后，可以安装开机自动配置服务：
-
-```bash
-sudo sh scripts/install-hid-gadget-service.sh
-```
-
-服务会等待厂商 USB Gadget 配置完成，在保留现有功能的基础上加入项目自己的标准键盘和绝对指针。RDK X5 默认不挂载相对鼠标端点，以避开复合 Gadget 的端点资源限制；软件适配层仍支持其他开发板启用相对鼠标。撤销时运行 `sudo sh scripts/install-hid-gadget-service.sh --remove`。
-
-RDK X5 已在 Windows 电脑上完成一次 45 秒实测：系统正常识别 `HID Keyboard Device` 和 `HID-compliant mouse`，原有 RNDIS 与只读存储同时保留；自动回滚后两个 HID 接口消失，QuickLink 和 Web 服务恢复。测试没有发送任何按键或鼠标报告。
-
-Linux USB Gadget 输出后端会通过 ConfigFS 的设备号匹配 `/dev/hidg*`，不假设键盘和鼠标的节点顺序。当前实机验证命令必须显式指定 `--release-only`：
-
-```bash
-sudo env PYTHONPATH=src python3 -m agent_ip_kvm.hid_output_cli --release-only
-```
-
-命令会等待 2.5 秒让主机完成 USB 接口配置，然后只发送 8 字节键盘全零报告和 4 字节鼠标全零报告。RDK X5 实测写入成功，随后 45 秒看门狗恢复原 Gadget；尚未开放命令行有效输入。
-
-## 启动最小 Web 界面
-
-页面骨架能够显示视频源状态、固定顶部工具栏和设备信息面板：
-
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.web \
-  --host 127.0.0.1 \
-  --port 8080 \
-  --source synthetic
-```
-
-使用视频文件源时增加 `--source file --file /path/to/video.mp4`。服务默认只监听本机；在受信的管理网络上访问时，显式指定该网络接口的地址。页面通过 MJPEG 持续显示画面；视频结束、源断开或编码失败时切换为 `No Signal`，点击刷新按钮可以重新连接视频流。
-
-在 Linux 开发板上使用 UVC 采集设备：
-
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.web \
-  --host 192.168.128.10 \
-  --port 8765 \
-  --source v4l2 \
-  --device /dev/video0 \
-  --width 1920 \
-  --height 1080 \
-  --fps 30
-```
-
-V4L2 Web 源当前要求采集设备提供 MJPEG。采集帧会直接进入浏览器 MJPEG 流，不经过额外视频编码。
-
-UGREEN 25854 的 USB 标识为 `2b89:5854`。在 Linux 开发板上安装保持唤醒规则：
-
-```bash
-sudo sh scripts/install-uvc-power-rule.sh 2b89 5854
-```
-
-规则只匹配指定 USB 标识，并立即把当前匹配设备设为 `power/control=on`。如需撤销：
-
-```bash
-sudo sh scripts/install-uvc-power-rule.sh --remove
-```
-
-顶部栏显示刷新、键盘、屏幕和设置按钮，不显示项目标题或品牌图标。视频区域左下角的两个按钮可把浏览器画面缩放到 50% 至 200%；屏幕菜单只选择采集设备实际支持的 MJPEG 分辨率和刷新率。缩放画面不会移动顶部工具栏或左下角按钮。网页打开且 HID 可用时，鼠标一进入实际视频画面就会自动把位置换算为绝对坐标，并同步位置、点击和滚轮，不需要点击开始按钮；视频区域隐藏浏览器本机光标，只保留回传画面中的被控端光标。键盘按钮会打开触屏屏幕键盘，修饰键可直接发送或通过粘滞模式组成组合键。
-
-Linux 上默认使用 `auto` 后端：USB 主机已配置 Gadget 且键盘、绝对指针端点均可写时，页面自动启用 HID；相对鼠标端点允许缺省。断开时会释放输入并恢复为未连接。为 Web 服务账号安装端点权限规则：
-
-```bash
-sudo sh scripts/install-hid-access-rule.sh sunrise
-```
-
-撤销规则使用 `sudo sh scripts/install-hid-access-rule.sh --remove`。该规则只改变 `/dev/hidg*` 的所有者和权限，不创建或重绑 USB Gadget。开发阶段也可以显式启用内存模拟后端，验证界面和输入生命周期而不控制连接的电脑：
-
-```bash
-PYTHONPATH=src python -m agent_ip_kvm.web \
-  --host 127.0.0.1 \
-  --port 8080 \
-  --source synthetic \
-  --enable-hid \
-  --hid-backend simulated
-```
-
-Linux USB Gadget 后端需要已经存在的 `hid.keyboard` 和 `hid.mouse` ConfigFS 功能；上述持久化服务可以在 RDK X5 上自动建立它们。正式环境开放真实输入前仍需完成认证和单一控制者机制。
-
-RDK X5 已完成一次受保护的真实 Web 键盘验证：开发板通过 Wi-Fi 保持独立管理，QuickLink Type-C 连接目标笔记本；180 秒自动回滚窗口内发送一个小写 `a`，并由 HDMI 回传画面确认字符进入空白记事本。验证后提前回滚，Web HID 自动回到断开状态。
-
-## Agent 安全闭环
-
-Agent 页面现在会把自然语言任务转换为白名单动作计划。只读观察自动取得一张 JPEG 并立即释放按需采集；键盘动作以及包含 BIOS、安装、重启、磁盘或固件语义的任务会显示风险与计划校验摘要，只有用户点击“批准并执行”后才能继续。执行结果和动作后画面摘要显示在同一会话中。
-
-主要接口如下：
-
-- `GET /api/video/snapshot.jpg`：取得一张当前画面；
-- `POST /api/agent/plans`：生成经过结构校验的动作计划；
-- `POST /api/agent/approve`、`/api/agent/reject`：按计划 ID 和摘要批准或拒绝；
-- `POST /api/agent/execute`：执行已满足审批条件的计划；
-- `GET /api/agent/audit`：读取最近的结构化审计事件；
-- `POST /api/pc-agent/suggestions`：接收经过配对认证的 PC Agent 建议和资料来源。
-
-首版识别器只会明确识别内置模拟测试图。真实 HDMI 截图会返回 `unknown`，供后续 OCR、固定 BIOS 页面识别或经过用户授权的视觉模型处理。当前规则规划器用于验证审批边界，Qwen2.5 本地模型尚未接入执行路径。
-
-在 RDK X5 上安装 Web 开机服务：
-
-```bash
-sudo sh scripts/install-web-service.sh sunrise /home/sunrise/agent-ip-kvm-app
-```
-
-服务监听 `0.0.0.0:8765`，使用 `/dev/video0` 的 1920×1080、30 fps MJPEG，并在异常退出后自动重启。使用 `sudo sh scripts/install-web-service.sh --remove` 可以撤销。RDK X5 已完成实际重启验证，Web 与 HID Gadget 服务均会自动恢复。
-
-## 读取被控主机信息
-
-HDMI 和 HID 不提供操作系统硬件清单，因此项目包含一个可选的 Windows 只读信息探针。在被控电脑的项目目录运行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/report-windows-host-info.ps1 -KvmUrl http://开发板地址:8765
-```
-
-脚本把系统、整机型号、BIOS、CPU、GPU、内存频率、物理磁盘、分区和网络地址发送给开发板。开发板验证后保存为 `data/controlled-host.json`，设置面板和未来的板载 Agent 读取同一文件。详细字段和数据流见 `docs/HOST_INFO.md`。
-
-安装 Web 服务后，PC Agent 配对令牌保存在开发板的 `data/pc-agent-token`，权限为 `0600`，不会写入 Git。再次上报主机信息时通过安全方式把令牌交给探针：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/report-windows-host-info.ps1 `
-  -KvmUrl http://开发板地址:8765 `
-  -PairingToken "从开发板读取的配对令牌"
-```
-
-## 计划架构
-
-```text
-用户界面 / API
-      │
-权限策略与审计 ── Agent 编排
-      │
-平台无关 KVM 核心
-      │
-┌─────┴──────────────┐
-│                    │
-视频采集适配层    USB HID 适配层
-│                    │
-UVC / CSI / 其他   ConfigFS / MCU / 其他
-      │
-RDK X5、树莓派及其他 Linux 开发板
-```
-
-第一版只验证真实画面采集、有限状态识别和只读建议。修改 BIOS、磁盘分区、系统安装等高风险操作必须展示具体计划，并由用户明确批准后才能执行。
+本地生成内容不参与版本管理：`node_modules/` 为依赖，`dist/` 为构建结果，`work/` 为测试报告和临时文件，`data/`、`runtime/` 为运行数据，`outputs/captures/` 为本地截图。项目计划等长期文档统一放在 `docs/`。
 
 ## 文档
 
-- [项目计划](outputs/IP_KVM_项目计划.md)
-- [需求文档](docs/REQUIREMENTS.md)
-- [项目历史](docs/HISTORY.md)
+- [TypeScript 使用说明](typescript/README.md)：完整功能、配置与 Linux 适配说明。
+- [验证记录](typescript/VALIDATION.md)：自动化验证范围及已知限制。
+- [文档索引](docs/README.md)：设计、需求、项目计划与历史记录。
+- [Python 历史说明](docs/PYTHON_LEGACY.md)：原版运行方式与实机记录。
 
 ## 开源许可
 

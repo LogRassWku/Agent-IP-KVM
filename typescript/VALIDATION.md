@@ -29,7 +29,7 @@
 - CI 已配置，但该记录不代表 GitHub Actions 的 Windows/Linux、Node 22/24 矩阵已经成功执行。
 - 后端和测试 strict 类型检查通过；UI 保留渐进式类型检查设置，详见 README。
 
-`src/agent_ip_kvm/`、原 Python `tests/` 和原 `scripts/` 未修改。原 HTML、CSS、SVG 原样保留到新目录。原 README 的实机记录仅属于 Python 基线。
+首次迁移时，`src/agent_ip_kvm/`、原 Python `tests/` 和原 `scripts/` 未修改；后续主分支清理见文末记录。原 HTML、CSS、SVG 原样保留到新目录。原 README 的实机记录仅属于 Python 基线。
 
 ## 首轮 CI 失败修复
 
@@ -56,3 +56,12 @@ GitHub Actions 首轮 push 的 Windows/Node 22 和 PR 的 Linux/Node 22 在同�
 服务端入口与路由/HTTP 边界/安装服务已分开。前端请求、会话同步、卡片、主机信息、后台任务和格式化模块已拆出，并增加完整 strict 的功能模块类型检查；原页面装配继续渐进式类型检查。HTML、CSS、SVG 和原 Python 文件未修改。
 
 本次本机检查目标为 41 项后端测试、10 项 Chromium 测试，全部纳入 `npm run check`。最终执行日志与该提交的 GitHub Actions 记录为验收依据；没有进行真实 HID、模型安装或 RDK X5 验证。
+
+## 2026-09-09 主分支清理
+
+- 远端 `legacy` 保持在 `d669afe36984abe10866f949b17300f578b000cf`。清理前逐文件确认：原源码、测试及三个配套脚本共 52 个文件均与该提交一致。
+- `main` 移除原 Python 源码、测试、打包配置、重复前端及 Python 专用服务安装脚本。共用 Shell/PowerShell/UEFI 工具、TypeScript Linux 适配和运行模板保留。
+- 兼容性测试改读 `typescript/tests/fixtures/python-baseline.json`：5 个原版静态资源 SHA-256 和 22 个 POST 接口，直接提取自固定 Python 提交。执行测试不需要 Python、网络或 Git 历史。
+- SVG 检出换行统一为 LF，确保 Windows/Linux HTTP 资源校验使用同一份原版字节。HTML、CSS、SVG 的 Git 内容及 UI 交互未改变。
+- 本次 Windows / Node.js 24.17.0 完整 `npm run check` 通过：类型检查、构建、41 项后端测试、10 项 Chromium 测试。另检查 27 处本地文档链接均有效。
+- Linux / RDK X5 硬件路径仍未经过实机验证。远端矩阵结果以本次提交的 GitHub Actions 为准。
